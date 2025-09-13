@@ -445,55 +445,68 @@ async function openDetails(size, bc){
   };
 
   // save: send to worker (complete-upload) and update UI
-  saveBtn.onclick = async () => {
-    const raw = unformatMoney(newPriceInput.value || '');
-    if(!raw){
-      alert('Vui lòng nhập giá hợp lệ (chỉ chữ số).');
-      newPriceInput.focus();
-      return;
+ saveBtn.onclick = async () => {
+  const raw = unformatMoney(newPriceInput.value || ''); // hoặc modalNewPriceHeader
+  if (!raw) { alert('Vui lòng nhập giá hợp lệ (chỉ chữ số).'); newPriceInput.focus(); return; }
+
+  // đảm bảo có admin key
+  let adminKey = getAdminKeySession();
+  if (!adminKey) {
+    adminKey = await promptAndValidateAdminKey();
+    if (!adminKey) { alert('Cần admin key để lưu giá.'); return; }
+  }
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Đang lưu...';
+
+  try {
+    // 1) Ghi price.txt & update entry cho barcode
+    const resp = await fetch(WORKER_BASE + '/complete-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': adminKey },
+      body: JSON.stringify({ size: String(size).trim(), barcode: String(bc.code).trim(), price: raw })
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(()=>resp.statusText);
+      throw new Error(txt || ('Status ' + resp.status));
     }
 
-    // require admin key
-    let adminKey = getAdminKeySession();
-    if(!adminKey){
-      adminKey = await promptAndValidateAdminKey();
-      if(!adminKey){
-        alert('Cần admin key để lưu giá.');
-        return;
-      }
-    }
-
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Đang lưu...';
-
+    // 2) Sau khi cập nhật entry đơn, gọi refresh-manifest để rebuild toàn bộ manifest (nên làm)
     try {
-      const resp = await fetch(WORKER_BASE + '/complete-upload', {
+      const r2 = await fetch(WORKER_BASE + '/refresh-manifest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': adminKey },
-        body: JSON.stringify({ size: String(size).trim(), barcode: String(bc.code).trim(), price: raw })
+        body: JSON.stringify({ now: Date.now() })
       });
-      if(!resp.ok){
-        const txt = await resp.text().catch(()=>resp.statusText);
-        throw new Error(txt || ('Status ' + resp.status));
+      if (!r2.ok) {
+        // không fatal: vẫn cố fetch manifest client-side (partial)
+        console.warn('refresh-manifest failed', r2.status);
+      } else {
+        // optional: consume response if needed
+        await r2.json().catch(()=>null);
       }
-      // update local bc.price and UI
-      bc.price = raw;
-      priceEl.textContent = formatMoney(raw);
-      priceEditRow.style.display = 'none';
-      // refresh manifest client
-      try { await fetchManifest(); } catch(e){ console.warn('fetchManifest after price update failed', e); }
-      // if current view is size or all, re-render so sorting updates
-      renderAccording();
-      alert('Đã cập nhật giá');
-    } catch (err) {
-      console.error('Save price error', err);
-      alert('Lỗi khi lưu giá: ' + (err.message || err));
-    } finally {
-      saveBtn.disabled = false;
-      saveBtn.textContent = 'Lưu';
+    } catch (e) {
+      console.warn('refresh-manifest error', e);
     }
-  };
 
+    // 3) reload client manifest để UI cập nhật
+    try { await fetchManifest(); } catch(e){ console.warn('fetchManifest failed after save', e); }
+
+    // cập nhật UI local
+    bc.price = raw; // cập nhật object hiện tại
+    const priceSpan = document.getElementById('modalPrice') || document.querySelector('#modalPrice');
+    if (priceSpan) priceSpan.textContent = formatMoney(raw);
+
+    priceEditRow.style.display = 'none';
+    alert('Đã cập nhật giá và làm mới manifest.');
+  } catch (err) {
+    console.error('Save price error', err);
+    alert('Lỗi khi lưu giá: ' + (err.message || err));
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Lưu';
+  }
+};
   // render images in modal body
   modalBody.innerHTML = '';
   const imgs = bc.images || [];
@@ -944,3 +957,4 @@ init();
 </script>
 </body>
 </html>
+
