@@ -151,9 +151,23 @@ img{ max-width:100%; display:block }
 <div id="modal" class="modal" role="dialog" aria-hidden="true">
   <div class="modal-content">
     <div class="modal-header">
-      <div><strong id="modalTitle"></strong></div>
-      <div style="display:flex;gap:8px;align-items:center"><button id="modalClose" class="btn">Đóng</button></div>
+  <div id="modalHeaderLeft" style="display:flex; flex-direction:column; gap:6px;">
+    <div style="font-weight:700"><span id="modalTitle"></span></div>
+    <div style="color:#666;font-size:13px">Price: <span id="modalPrice">—</span></div>
+  </div>
+
+  <div id="modalHeaderRight" style="display:flex; gap:8px; align-items:center;">
+    <button id="changePriceBtn" class="btn">Thay giá</button>
+
+    <div id="priceEditRow" style="display:none; gap:8px; align-items:center;">
+      <input id="modalNewPrice" type="text" placeholder="Nhập giá mới" style="padding:8px;border-radius:8px;border:1px solid #ddd;min-width:140px;">
+      <button id="savePriceBtn" class="btn primary">Lưu</button>
+      <button id="cancelPriceBtn" class="btn">Hủy</button>
     </div>
+
+    <button id="modalClose" class="btn">Đóng</button>
+  </div>
+</div>
     <div class="modal-body" id="modalBody"></div>
   </div>
 </div>
@@ -382,7 +396,7 @@ function makeCard(size, bc, withCheckbox=false){
 }
 
 /* open details */
-// --- helper: format/unformat price ---
+// helper format/unformat (nếu chưa có)
 function formatMoney(val){
   if(val === null || val === undefined || val === '') return '—';
   const s = String(val).replace(/[^\d]/g,'');
@@ -393,69 +407,86 @@ function unformatMoney(s){
   return String(s||'').replace(/[^\d]/g,'').trim();
 }
 
-// --- replace existing openDetails(...) with this version ---
+// Replace existing openDetails with this:
 async function openDetails(size, bc){
-  // build header title
-  modalTitle.textContent = `${size} — ${bc.code}`;
-  modalBody.innerHTML = '';
+  // Fill header title & price
+  const titleEl = document.getElementById('modalTitle');
+  const priceEl = document.getElementById('modalPrice');
+  titleEl.textContent = `${size} — ${bc.code}`;
+  priceEl.textContent = formatMoney(bc.price);
 
-  // top info bar (title, price, edit button)
-  const infoBar = document.createElement('div');
-  infoBar.style.display = 'flex';
-  infoBar.style.justifyContent = 'space-between';
-  infoBar.style.alignItems = 'center';
-  infoBar.style.marginBottom = '10px';
+  // Ensure edit row hidden by default
+  const priceEditRow = document.getElementById('priceEditRow');
+  const changeBtn = document.getElementById('changePriceBtn');
+  const saveBtn = document.getElementById('savePriceBtn');
+  const cancelBtn = document.getElementById('cancelPriceBtn');
+  const newPriceInput = document.getElementById('modalNewPrice');
 
-  const left = document.createElement('div');
-  left.style.display = 'flex';
-  left.style.flexDirection = 'column';
-  left.innerHTML = `<div style="font-weight:700">${escapeHtml(String(size))} — ${escapeHtml(String(bc.code))}</div>
-                    <div style="color:#666;margin-top:6px">Price: <span id="modalPrice">${formatMoney(bc.price)}</span></div>`;
-
-  const right = document.createElement('div');
-  right.style.display = 'flex';
-  right.style.gap = '8px';
-  right.style.alignItems = 'center';
-
-  const changeBtn = document.createElement('button');
-  changeBtn.className = 'btn';
-  changeBtn.textContent = 'Thay giá';
-  right.appendChild(changeBtn);
-
-  infoBar.appendChild(left);
-  infoBar.appendChild(right);
-  modalBody.appendChild(infoBar);
-
-  // edit row (hidden initially)
-  const editRow = document.createElement('div');
-  editRow.style.display = 'none';
-  editRow.style.marginBottom = '12px';
-  editRow.style.gap = '8px';
-  editRow.style.alignItems = 'center';
-
-  const newPriceInput = document.createElement('input');
-  newPriceInput.type = 'text';
-  newPriceInput.placeholder = 'Nhập giá mới';
-  newPriceInput.style.padding = '8px';
-  newPriceInput.style.borderRadius = '8px';
-  newPriceInput.style.border = '1px solid #ddd';
-  newPriceInput.style.minWidth = '160px';
+  priceEditRow.style.display = 'none';
   newPriceInput.value = bc.price ? unformatMoney(bc.price) : '';
 
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'btn primary';
-  saveBtn.textContent = 'Lưu';
+  // wire up change button: show edit row
+  changeBtn.onclick = () => {
+    priceEditRow.style.display = 'flex';
+    newPriceInput.focus();
+    newPriceInput.select();
+  };
 
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'btn';
-  cancelBtn.textContent = 'Hủy';
+  // cancel: hide and restore
+  cancelBtn.onclick = () => {
+    priceEditRow.style.display = 'none';
+    newPriceInput.value = bc.price ? unformatMoney(bc.price) : '';
+  };
 
-  editRow.appendChild(newPriceInput);
-  editRow.appendChild(saveBtn);
-  editRow.appendChild(cancelBtn);
-  modalBody.appendChild(editRow);
+  // save behavior
+  saveBtn.onclick = async () => {
+    const raw = unformatMoney(newPriceInput.value || '');
+    if(!raw){
+      alert('Vui lòng nhập giá hợp lệ (chỉ chữ số).');
+      newPriceInput.focus();
+      return;
+    }
 
-  // details grid (images)
+    // require admin key
+    let adminKey = getAdminKeySession();
+    if(!adminKey){
+      adminKey = await promptAndValidateAdminKey();
+      if(!adminKey){
+        alert('Cần admin key để lưu giá.');
+        return;
+      }
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Đang lưu...';
+
+    try {
+      const resp = await fetch(WORKER_BASE + '/complete-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': adminKey },
+        body: JSON.stringify({ size: String(size).trim(), barcode: String(bc.code).trim(), price: raw })
+      });
+      if(!resp.ok){
+        const txt = await resp.text().catch(()=>resp.statusText);
+        throw new Error(txt || ('Status ' + resp.status));
+      }
+      // update UI & client manifest
+      bc.price = raw;
+      priceEl.textContent = formatMoney(raw);
+      priceEditRow.style.display = 'none';
+      try { await fetchManifest(); } catch(e){ console.warn('fetchManifest after price update failed', e); }
+      alert('Đã cập nhật giá');
+    } catch (err) {
+      console.error('Save price error', err);
+      alert('Lỗi khi lưu giá: ' + (err.message || err));
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Lưu';
+    }
+  };
+
+  // render images in modalBody
+  modalBody.innerHTML = '';
   const imgs = bc.images || [];
   const div = document.createElement('div'); div.className='detail-grid';
   for(const fn of imgs){
@@ -469,58 +500,10 @@ async function openDetails(size, bc){
   modalBody.appendChild(div);
 
   // show modal
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden','false');
+  modal.classList.add('open'); modal.setAttribute('aria-hidden','false');
 
-  // handlers
-  changeBtn.onclick = ()=>{
-    editRow.style.display = 'flex';
-    newPriceInput.focus();
-    // optionally auto-select digits
-    newPriceInput.select();
-  };
-  cancelBtn.onclick = ()=>{
-    editRow.style.display = 'none';
-    newPriceInput.value = bc.price ? unformatMoney(bc.price) : '';
-  };
-
-  saveBtn.onclick = async ()=>{
-    const raw = unformatMoney(newPriceInput.value || '');
-    if(!raw){ alert('Vui lòng nhập giá hợp lệ (chỉ chữ số).'); newPriceInput.focus(); return; }
-    // require admin key
-    let key = getAdminKeySession();
-    if(!key){
-      key = await promptAndValidateAdminKey();
-      if(!key) { alert('Cần admin key để lưu giá.'); return; }
-    }
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Đang lưu...';
-    try {
-      const resp = await fetch(WORKER_BASE + '/complete-upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': key },
-        body: JSON.stringify({ size: String(size).trim(), barcode: String(bc.code).trim(), price: raw })
-      });
-      if(!resp.ok){
-        const txt = await resp.text().catch(()=>resp.statusText);
-        throw new Error(txt || ('Status ' + resp.status));
-      }
-      // success -> update local bc.price and UI
-      bc.price = raw;
-      const priceSpan = document.getElementById('modalPrice');
-      if(priceSpan) priceSpan.textContent = formatMoney(raw);
-      editRow.style.display = 'none';
-      // refresh manifest on client
-      try { await fetchManifest(); } catch(e){ console.warn('fetchManifest after price update failed', e); }
-      alert('Đã cập nhật giá');
-    } catch(err){
-      console.error('Save price error', err);
-      alert('Lỗi khi lưu giá: ' + (err.message || err));
-    } finally {
-      saveBtn.disabled = false;
-      saveBtn.textContent = 'Lưu';
-    }
-  };
+  // ensure the close button works as before
+  document.getElementById('modalClose').onclick = ()=>{ modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); };
 }
 
 /* actions bar */
