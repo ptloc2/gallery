@@ -445,7 +445,7 @@ async function openDetails(size, bc){
   };
 
   // save: send to worker (complete-upload) and update UI
-  saveBtn.onclick = async () => {
+    saveBtn.onclick = async () => {
   const raw = unformatMoney(newPriceInput.value || ''); // hoặc modalNewPriceHeader
   if (!raw) { alert('Vui lòng nhập giá hợp lệ (chỉ chữ số).'); newPriceInput.focus(); return; }
 
@@ -999,5 +999,3 @@ init();
 </script>
 </body>
 </html>
-
-
