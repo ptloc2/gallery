@@ -107,8 +107,9 @@ body.dark .modal-content{ background:#0f1315; color:#e6e9eb }
 .table-add th:nth-child(1), .table-add td:nth-child(1) { width:90px; }
 .table-add th:nth-child(2), .table-add td:nth-child(2) { width:160px; }
 .table-add th:nth-child(3), .table-add td:nth-child(3) { width:120px; }
-.table-add th:nth-child(4), .table-add td:nth-child(4) { width:auto; }
-.table-add th:nth-child(5), .table-add td:nth-child(5) { width:120px; }
+.table-add th:nth-child(4), .table-add td:nth-child(4) { width:120px; } /* price col */
+.table-add th:nth-child(5), .table-add td:nth-child(5) { width:auto; }
+.table-add th:nth-child(6), .table-add td:nth-child(6) { width:120px; }
 
 .small-thumb { width:60px; height:60px; object-fit:cover; border-radius:6px; background:#fafafa; display:block; }
 .row-actions { display:flex; gap:6px; align-items:center; }
@@ -116,6 +117,10 @@ body.dark .modal-content{ background:#0f1315; color:#e6e9eb }
 /* float delete */
 .float-delete{ position:fixed; left:12px; bottom:12px; z-index:150; display:none; }
 .float-delete button{ background:#ff3b30; color:#fff; border:none; padding:12px 16px; border-radius:12px; box-shadow:0 6px 18px rgba(0,0,0,0.15); cursor:pointer; font-weight:700; }
+
+/* sort control small */
+.sort-inline { display:inline-flex; gap:6px; align-items:center; margin-left:8px; }
+.select-small { padding:6px; border-radius:8px; border:1px solid #d6ecff; background:var(--tab-bg); color:var(--tab-text); }
 
 /* responsive */
 @media (min-width: 600px) and (max-width: 999px) { .grid{ grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; } }
@@ -168,8 +173,7 @@ img{ max-width:100%; display:block }
 
 <script>
 /* CONFIG */
-const WORKER_BASE = "https://shoes-worker.lapproak0.workers.dev";
-const PUBLIC_BASE = "https://pub-9a763a2453ba41939860c4caded896a0.r2.dev";
+const WORKER_BASE = "https://test.lapproak0.workers.dev";
 const PREFIX = "Shoes";
 
 /* DOM */
@@ -178,7 +182,6 @@ const tabsEl = document.getElementById('tabs');
 const contentEl = document.getElementById('content');
 const searchInput = document.getElementById('searchInput');
 const refreshBtn = document.getElementById('refreshBtn');
-const clearKeyBtn = document.getElementById('clearKeyBtn');
 const themeToggle = document.getElementById('themeToggle');
 
 const modal = document.getElementById('modal');
@@ -200,6 +203,7 @@ let manifestMap = {};
 let activeTab = 'all';
 let selectedItems = new Set();
 let multiSelectMode = false;
+let priceSortMode = null; // 'asc' | 'desc' | null
 
 /* session admin key */
 function getAdminKeySession() {return sessionStorage.getItem('admin_key_v1') || null;}
@@ -241,7 +245,6 @@ async function promptAndValidateAdminKey(){
   }
 }
 
-
 /* theme */
 function applyTheme(isDark){ document.body.classList.toggle('dark', !!isDark); sessionStorage.setItem('dark_mode_v1', !!isDark); }
 themeToggle.onclick = ()=>{ const isDark = !document.body.classList.contains('dark'); applyTheme(isDark); };
@@ -258,7 +261,7 @@ function normalizeManifest(raw){
   if(!raw) return { sizes: [] };
   if(Array.isArray(raw)) return { sizes: raw };
   if(raw.sizes && Array.isArray(raw.sizes)) {
-    return { sizes: raw.sizes.map(s=>({ size: String(s.size||s.name||'').trim(), barcodes: Array.isArray(s.barcodes) ? s.barcodes.map(b=>({ code: String(b.code||'').trim(), images: Array.isArray(b.images)?b.images.slice():[] })) : [] })) };
+    return { sizes: raw.sizes.map(s=>({ size: String(s.size||s.name||'').trim(), barcodes: Array.isArray(s.barcodes) ? s.barcodes.map(b=>({ code: String(b.code||'').trim(), images: Array.isArray(b.images)?b.images.slice():[], price: b.price })) : [] })) };
   }
   const sizes=[];
   const IGNORE_KEYS = new Set(['meta','version','manifest','trash']);
@@ -268,6 +271,7 @@ function normalizeManifest(raw){
       const barcodes=[];
       for(const [code, imgs] of Object.entries(v)){
         if(Array.isArray(imgs)) barcodes.push({ code: String(code).trim(), images: imgs.slice() });
+        else if(imgs && typeof imgs === 'object' && Array.isArray(imgs.images)) barcodes.push({ code: String(code).trim(), images: imgs.images.slice(), price: imgs.price });
       }
       if(barcodes.length) sizes.push({ size: String(k).trim(), barcodes });
     }
@@ -304,7 +308,6 @@ async function fetchManifest({ forceRefresh=false }={}) {
     }
     manifest = normalizeManifest(manifestRaw || {});
     buildManifestMap();
-    // do not print sizes count per user's request
     logStatus('Manifest loaded');
     buildTabs();
   } catch(err){
@@ -352,7 +355,7 @@ function makeCard(size, bc, withCheckbox=false){
   const thumbName = (Array.isArray(bc.images) && bc.images.find(x=>/thumb/i.test(x))) || (Array.isArray(bc.images)? bc.images[0] : null) || 'thumb.jpeg';
   const encSize = encodeURIComponent(String(size).trim());
   const encCode = encodeURIComponent(String(bc.code).trim());
-  const src = `${PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
+  const src = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
 
   const wrap = document.createElement('div'); wrap.className='thumb-wrap';
   const img = document.createElement('img'); img.src = src; img.alt = bc.code;
@@ -387,7 +390,7 @@ function openDetails(size, bc){
   for(const fn of imgs){
     const imWrap = document.createElement('div');
     const im = document.createElement('img');
-    im.src = `${PUBLIC_BASE}/${PREFIX}/${encodeURIComponent(String(size).trim())}/${encodeURIComponent(String(bc.code).trim())}/${encodeURIComponent(fn)}`;
+    im.src = `${WORKER_BASE}/${PREFIX}/${encodeURIComponent(String(size).trim())}/${encodeURIComponent(String(bc.code).trim())}/${encodeURIComponent(fn)}`;
     im.style.width='100%'; im.style.height='auto'; im.style.objectFit='cover';
     imWrap.appendChild(im);
     div.appendChild(imWrap);
@@ -405,7 +408,28 @@ function renderActionsBar(){
     const toggleBtn = document.createElement('button'); toggleBtn.className='btn tab-like';
     toggleBtn.textContent = multiSelectMode ? 'Hủy' : 'Chọn xóa';
     toggleBtn.onclick = ()=>{ multiSelectMode = !multiSelectMode; if(!multiSelectMode) selectedItems.clear(); updateBodyMultiselectClass(); floatDelete.style.display = multiSelectMode ? 'block' : 'none'; renderAccording(); };
+
     left.appendChild(toggleBtn);
+
+    // sort by price inline control
+    const sortWrap = document.createElement('div'); sortWrap.className='sort-inline';
+    const sortBtn = document.createElement('button'); sortBtn.className='btn tab-like'; sortBtn.textContent = 'Sắp xếp giá';
+    const sortSel = document.createElement('select'); sortSel.className = 'select-small';
+    const optNone = document.createElement('option'); optNone.value='none'; optNone.textContent='Không';
+    const optAsc = document.createElement('option'); optAsc.value='asc'; optAsc.textContent='Từ thấp → cao';
+    const optDesc = document.createElement('option'); optDesc.value='desc'; optDesc.textContent='Từ cao → thấp';
+    sortSel.appendChild(optNone); sortSel.appendChild(optAsc); sortSel.appendChild(optDesc);
+    sortSel.value = priceSortMode || 'none';
+    sortSel.onchange = ()=> {
+      const val = sortSel.value;
+      priceSortMode = (val === 'none') ? null : val;
+      // if currently in 'all' view, re-render sorted list
+      if(activeTab === 'all') applyPriceSortAndRender(priceSortMode);
+      else renderAccording();
+    };
+    sortWrap.appendChild(sortBtn); sortWrap.appendChild(sortSel);
+    left.appendChild(sortWrap);
+
   } else {
     const spacer = document.createElement('div'); spacer.style.height='1px'; spacer.style.display='inline-block'; left.appendChild(spacer);
   }
@@ -483,6 +507,11 @@ floatDeleteBtn.onclick = performBulkDelete;
 function renderAll(){
   contentEl.innerHTML = '';
   contentEl.appendChild(renderActionsBar());
+  // if priceSortMode apply sorting
+  if(priceSortMode){
+    applyPriceSortAndRender(priceSortMode);
+    return;
+  }
   for(const s of manifest.sizes){
     const h=document.createElement('div'); h.className='section-title'; h.textContent = String(s.size); contentEl.appendChild(h);
     const grid=document.createElement('div'); grid.className='grid';
@@ -497,6 +526,25 @@ function renderSize(sizeStr){
   if(!s){ contentEl.innerHTML='<div class="muted">Không có size này</div>'; return; }
   const grid=document.createElement('div'); grid.className='grid';
   for(const bc of s.barcodes) grid.appendChild(makeCard(s.size, bc, false));
+  contentEl.appendChild(grid);
+}
+
+/* Sort & render "All" by price */
+function applyPriceSortAndRender(mode) {
+  // build array of { size, barcode, price, images }
+  const arr = [];
+  for (const s of manifest.sizes) {
+    for (const b of s.barcodes) {
+      const priceVal = b && (b.price || b.price === 0) ? Number(String(b.price).replace(/[^\d]/g,'')) : Infinity;
+      arr.push({ size: s.size, barcodeObj: b, price: priceVal });
+    }
+  }
+  arr.sort((a,b)=> (mode === 'asc') ? (a.price - b.price) : (b.price - a.price));
+  // render
+  contentEl.innerHTML = '';
+  contentEl.appendChild(renderActionsBar());
+  const grid=document.createElement('div'); grid.className='grid';
+  for(const it of arr){ grid.appendChild(makeCard(it.size, it.barcodeObj, false)); }
   contentEl.appendChild(grid);
 }
 
@@ -522,7 +570,7 @@ function renderAdd(){
 
   const tableWrap = document.createElement('div'); tableWrap.className='table-wrap'; tableWrap.style.marginTop='10px';
   const table = document.createElement('table'); table.className='table-add';
-  const thead = document.createElement('thead'); thead.innerHTML = `<tr><th>Thumb</th><th>Barcode</th><th>Size</th><th>Details</th><th>Action</th></tr>`; table.appendChild(thead);
+  const thead = document.createElement('thead'); thead.innerHTML = `<tr><th>Thumb</th><th>Barcode</th><th>Size</th><th>Price</th><th>Details</th><th>Action</th></tr>`; table.appendChild(thead);
   const tbody = document.createElement('tbody'); table.appendChild(tbody); tableWrap.appendChild(table); container.appendChild(tableWrap);
 
   const folderLabel = document.createElement('div'); folderLabel.className='muted'; folderLabel.style.marginTop='8px'; folderLabel.textContent='Optional: chọn folder "Shoes" (desktop Chrome/Edge only)';
@@ -548,16 +596,23 @@ function renderAdd(){
     sizeSelect.onchange = ()=>{ if(sizeSelect.value === '__new__'){ newSizeInput.style.display='inline-block'; newSizeInput.value = ''; newSizeInput.focus(); } else { newSizeInput.style.display='none'; } };
     if(prefill.size && !manifestMap[String(prefill.size)]){ sizeSelect.value='__new__'; newSizeInput.style.display='inline-block'; newSizeInput.value = prefill.size; }
 
+    // Price column (new)
+    const tdPrice = document.createElement('td'); const priceInput = document.createElement('input'); priceInput.type='text'; priceInput.placeholder='1200000'; priceInput.style.width='110px';
+    if(prefill.price) priceInput.value = String(prefill.price);
+    tdPrice.appendChild(priceInput);
+
     const tdDetails = document.createElement('td'); const inputDetails = document.createElement('input'); inputDetails.type = 'file'; inputDetails.accept = 'image/*'; inputDetails.multiple = true; const detailsPreviewWrap = document.createElement('div'); detailsPreviewWrap.style.display='flex'; detailsPreviewWrap.style.gap='6px'; detailsPreviewWrap.style.marginTop='6px'; tdDetails.appendChild(inputDetails); tdDetails.appendChild(detailsPreviewWrap);
     inputDetails.onchange = (e) => { detailsPreviewWrap.innerHTML = ''; const files = Array.from(e.target.files || []); for(const f of files){ const img = document.createElement('img'); img.src = URL.createObjectURL(f); img.className='small-thumb'; detailsPreviewWrap.appendChild(img); } tr.__prefilledFiles = null; };
     if(prefill.detailFiles && prefill.detailFiles.length){ for(const f of prefill.detailFiles){ const img = document.createElement('img'); img.src = URL.createObjectURL(f); img.className='small-thumb'; detailsPreviewWrap.appendChild(img); } tr.__prefilledFiles = prefill.detailFiles.slice(); }
 
     const tdAction = document.createElement('td'); const removeBtn = document.createElement('button'); removeBtn.className='btn tab-like'; removeBtn.textContent='Xóa'; removeBtn.onclick = ()=> tr.remove(); const actionWrap = document.createElement('div'); actionWrap.className='row-actions'; actionWrap.appendChild(removeBtn); tdAction.appendChild(actionWrap);
 
-    tr.appendChild(tdThumb); tr.appendChild(tdBarcode); tr.appendChild(tdSize); tr.appendChild(tdDetails); tr.appendChild(tdAction); tbody.appendChild(tr);
+    tr.appendChild(tdThumb); tr.appendChild(tdBarcode); tr.appendChild(tdSize); tr.appendChild(tdPrice); tr.appendChild(tdDetails); tr.appendChild(tdAction); tbody.appendChild(tr);
 
     if(prefill.thumbFile){ thumbPreview.src = URL.createObjectURL(prefill.thumbFile); thumbPreview.style.display='block'; tr.__prefilledThumbFile = prefill.thumbFile; }
-    return { tr, inputThumb, thumbPreview, inputBarcode, sizeSelect, newSizeInput, inputDetails, detailsPreviewWrap };
+    // store references
+    tr.__fields = { inputThumb, inputBarcode, sizeSelect, newSizeInput, priceInput, inputDetails, detailsPreviewWrap };
+    return { tr, inputThumb, thumbPreview, inputBarcode, sizeSelect, newSizeInput, inputDetails, detailsPreviewWrap, priceInput };
   }
 
   addRowBtn.onclick = ()=> addRow();
@@ -568,14 +623,17 @@ function renderAdd(){
     if(rows.length===0) return alert('Chưa có dòng nào để upload');
 
     const rowInfos = rows.map(r=>{
+      // updated indices because Price column added
       const inputThumb = r.querySelector('td:nth-child(1) input[type="file"]');
       const inputBarcode = r.querySelector('td:nth-child(2) input[type="text"]');
       const sizeSelect = r.querySelector('td:nth-child(3) select');
       const newSizeInput = r.querySelector('td:nth-child(3) input[type="text"]');
-      const inputDetails = r.querySelector('td:nth-child(4) input[type="file"][multiple]');
+      const priceInput = r.querySelector('td:nth-child(4) input[type="text"]');
+      const inputDetails = r.querySelector('td:nth-child(5) input[type="file"][multiple]');
       const barcode = (inputBarcode && inputBarcode.value || '').trim();
       const sizeVal = sizeSelect ? sizeSelect.value : (newSizeInput ? newSizeInput.value : '');
-      return { tr:r, inputThumb, inputBarcode, barcode, sizeSelect, sizeVal, newSizeInput, inputDetails };
+      const priceVal = priceInput ? (priceInput.value || '').trim() : '';
+      return { tr:r, inputThumb, inputBarcode, barcode, sizeSelect, sizeVal, newSizeInput, inputDetails, priceInput, priceVal };
     });
 
     for(const ri of rowInfos){
@@ -609,7 +667,7 @@ function renderAdd(){
       else if(detailsFiles.length>0) thumbFile = detailsFiles[0];
       if(thumbFile){ const processed = await convertImageFileToJpeg(thumbFile); const thumb = new File([await processed.arrayBuffer()], 'thumb.jpeg', { type: 'image/jpeg' }); prepared.push({ file: thumb, remoteName: 'thumb.jpeg' }); }
       for(const f of detailsFiles){ const p = await convertImageFileToJpeg(f); prepared.push({ file: p, remoteName: p.name }); }
-      groups.push({ size: effectiveSize, barcode: ri.barcode, prepared });
+      groups.push({ size: effectiveSize, barcode: ri.barcode, prepared, price: ri.priceVal || '' });
     }
 
     if(groups.length === 0) return alert('Không có hàng để upload sau khi áp dụng skip rules');
@@ -652,10 +710,16 @@ function renderAdd(){
     for(const size of Object.keys(groupsMap)){
       for(const barcode of Object.keys(groupsMap[size])){
         const items = groupsMap[size][barcode];
-        const detailFiles = items.map(x=>x.file);
+        const detailFiles = items.filter(x=>!/^price\.txt$/i.test(x.relPath) && !/^thumb/i.test(x.relPath)).map(x=>x.file);
         const t = items.find(x=>/thumb\./i.test(x.relPath));
         const thumbFile = t ? t.file : (items[0] && items[0].file);
-        const rowObj = addRow({ barcode, size, detailFiles, thumbFile });
+        // detect price.txt
+        const p = items.find(x=>/^price\.txt$/i.test(x.relPath));
+        let detectedPrice = '';
+        if(p){
+          try { const txt = await p.file.text(); const num = (txt||'').replace(/[^\d]/g,'').trim(); if(num) detectedPrice = num; } catch(e){ /* ignore */ }
+        }
+        const rowObj = addRow({ barcode, size, detailFiles, thumbFile, price: detectedPrice });
         rowObj.tr.__prefilledFiles = detailFiles.slice();
         if(thumbFile) rowObj.tr.__prefilledThumbFile = thumbFile;
         if(!manifestMap[size]){ rowObj.sizeSelect.value='__new__'; rowObj.newSizeInput.style.display='inline-block'; rowObj.newSizeInput.value = size; }
@@ -699,8 +763,10 @@ async function uploadPreparedGroups(preparedGroups, adminKey){
       const p = g.prepared[i]; const fileObj = fileObjs[i]; const url = urls[p.remoteName]; if(!url) throw new Error('Missing presigned URL for ' + p.remoteName);
       try{ await uploadFileWithProgress(url, p.file, (loaded, total)=>{ updateFileProgress(fileObj, loaded, total); const groupEstimate = groupLoaded + loaded; updateGroupProgress(groupEl, Math.min(groupEstimate, groupTotal), groupTotal); updateOverallProgress(overallLoaded + loaded, overallTotal); }); updateFileProgress(fileObj, p.file.size, p.file.size); groupLoaded += p.file.size; overallLoaded += p.file.size; updateGroupProgress(groupEl, groupLoaded, groupTotal); updateOverallProgress(overallLoaded, overallTotal); fileObj.statusEl.textContent = 'OK'; } catch(e){ fileObj.statusEl.textContent = 'ERR'; console.error('Upload file error', e); throw e; }
     }
-    const complete = await fetch(WORKER_BASE + '/complete-upload', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ size: g.size, barcode: g.barcode })});
+    // complete upload: include price in body; include adminKey header as well
+    const complete = await fetch(WORKER_BASE + '/complete-upload', { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': adminKey }, body: JSON.stringify({ size: g.size, barcode: g.barcode, price: g.price || '' })});
     if(!complete.ok){ const t = await complete.text().catch(()=>complete.statusText); throw new Error('Complete-upload failed: ' + t); }
+    updateOverallProgress(overallLoaded, overallTotal);
   }
 
   updateOverallProgress(overallLoaded, overallTotal);
@@ -714,7 +780,6 @@ function doSearch(){ const q = (searchInput.value||'').trim().toLowerCase(); if(
 
 /* refresh & clear key */
 refreshBtn.onclick = async ()=> { try{ const key = await promptAndValidateAdminKey(); if(!key) return; const r = await fetch(WORKER_BASE + '/refresh-manifest', { method:'POST', headers:{ 'x-api-key': key }}); if(!r.ok){ const t = await r.text().catch(()=>r.statusText); throw new Error('Refresh failed: ' + t); } await fetchManifest(); alert('Manifest rebuilt'); } catch(err){ console.error(err); alert('Refresh error: ' + err.message); } };
-//clearKeyBtn.onclick = ()=> { setAdminKeySession(null); alert('Admin key đã xóa khỏi session'); };
 
 /* share single card */
 async function shareMultipleImages(size, barcodeObj){
@@ -722,7 +787,7 @@ async function shareMultipleImages(size, barcodeObj){
     showModal('Chuẩn bị chia sẻ', '<div id="prepareMsg">Đang lấy ảnh, vui lòng chờ…</div>');
     const encSize = encodeURIComponent(String(size).trim());
     const encCode = encodeURIComponent(String(barcodeObj.code).trim());
-    const urls = (barcodeObj.images || []).map(f => `${PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(f)}`);
+    const urls = (barcodeObj.images || []).map(f => `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(f)}`);
     const files = [];
     for(const u of urls){
       try{
@@ -741,9 +806,6 @@ async function shareMultipleImages(size, barcodeObj){
         return;
       }
     } catch(err){ console.warn('navigator.share failed:', err); }
-    /*const el = document.createElement('div');
-    for(const f of files){ const img = document.createElement('img'); img.src = URL.createObjectURL(f); img.style.maxWidth='100%'; img.style.marginBottom='8px'; el.appendChild(img); }
-    showModal('Ảnh để lưu thủ công', el);*/
   } catch(err){ console.error('shareMultipleImages error', err); try { document.getElementById('modalClose').click(); } catch(e){} alert('Lỗi khi chia sẻ: ' + (err.message || err)); }
 }
 
@@ -758,5 +820,4 @@ init();
 
 </script>
 </body>
-
 </html>
