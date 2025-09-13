@@ -412,22 +412,24 @@ function renderActionsBar(){
     left.appendChild(toggleBtn);
 
     // sort by price inline control
-    const sortWrap = document.createElement('div'); sortWrap.className='sort-inline';
-    const sortBtn = document.createElement('button'); sortBtn.className='btn tab-like'; sortBtn.textContent = 'Sắp xếp giá';
-    const sortSel = document.createElement('select'); sortSel.className = 'select-small';
-    const optNone = document.createElement('option'); optNone.value='none'; optNone.textContent='Không';
-    const optAsc = document.createElement('option'); optAsc.value='asc'; optAsc.textContent='Từ thấp → cao';
-    const optDesc = document.createElement('option'); optDesc.value='desc'; optDesc.textContent='Từ cao → thấp';
-    sortSel.appendChild(optNone); sortSel.appendChild(optAsc); sortSel.appendChild(optDesc);
-    sortSel.value = priceSortMode || 'none';
+       // sort by price inline control (only Asc/Desc; no "None", no separate button)
+    const sortWrap = document.createElement('div');
+    sortWrap.className = 'sort-inline';
+    const sortSel = document.createElement('select');
+    sortSel.className = 'select-small';
+    const optAsc = document.createElement('option'); optAsc.value = 'asc'; optAsc.textContent = 'Từ thấp → cao';
+    const optDesc = document.createElement('option'); optDesc.value = 'desc'; optDesc.textContent = 'Từ cao → thấp';
+    sortSel.appendChild(optAsc);
+    sortSel.appendChild(optDesc);
+    // default to asc if priceSortMode not set
+    sortSel.value = priceSortMode || 'asc';
     sortSel.onchange = ()=> {
       const val = sortSel.value;
-      priceSortMode = (val === 'none') ? null : val;
-      // if currently in 'all' view, re-render sorted list
+      priceSortMode = val; // always 'asc' or 'desc'
       if(activeTab === 'all') applyPriceSortAndRender(priceSortMode);
       else renderAccording();
     };
-    sortWrap.appendChild(sortBtn); sortWrap.appendChild(sortSel);
+    sortWrap.appendChild(sortSel);
     left.appendChild(sortWrap);
 
   } else {
