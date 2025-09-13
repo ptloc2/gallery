@@ -405,7 +405,7 @@ function formatMoney(val){
   if(val === null || val === undefined || val === '') return '—';
   const s = String(val).replace(/[^\d]/g,'');
   if(!s) return '—';
-  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ".") + ' đ';
+  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 function unformatMoney(s){
   return String(s||'').replace(/[^\d]/g,'').trim();
@@ -720,7 +720,7 @@ function renderAdd(){
     if(prefill.size && !manifestMap[String(prefill.size)]){ sizeSelect.value='__new__'; newSizeInput.style.display='inline-block'; newSizeInput.value = prefill.size; }
 
     // Price column (new)
-    const tdPrice = document.createElement('td'); const priceInput = document.createElement('input'); priceInput.type='text'; priceInput.placeholder='1200000'; priceInput.style.width='110px';
+    const tdPrice = document.createElement('td'); const priceInput = document.createElement('input'); priceInput.type='text'; priceInput.placeholder='990'; priceInput.style.width='110px';
     if(prefill.price) priceInput.value = String(prefill.price);
     tdPrice.appendChild(priceInput);
 
