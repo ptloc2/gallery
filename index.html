@@ -509,47 +509,52 @@ floatDeleteBtn.onclick = performBulkDelete;
 function renderAll(){
   contentEl.innerHTML = '';
   contentEl.appendChild(renderActionsBar());
-  // if priceSortMode apply sorting
-  if(priceSortMode){
-    applyPriceSortAndRender(priceSortMode);
-    return;
-  }
+
+  // mỗi size vẫn là một section; trong mỗi section, sort theo price nếu priceSortMode
   for(const s of manifest.sizes){
-    const h=document.createElement('div'); h.className='section-title'; h.textContent = String(s.size); contentEl.appendChild(h);
-    const grid=document.createElement('div'); grid.className='grid';
-    for(const bc of s.barcodes) grid.appendChild(makeCard(s.size, bc, false));
+    const h = document.createElement('div'); h.className='section-title'; h.textContent = String(s.size); contentEl.appendChild(h);
+    const grid = document.createElement('div'); grid.className='grid';
+
+    // copy danh sách barcodes để không ảnh hưởng gốc
+    let barcodes = Array.isArray(s.barcodes) ? s.barcodes.slice() : [];
+    if(priceSortMode){
+      barcodes.sort((a,b)=>{
+        const pa = a && (a.price || a.price === 0) ? Number(String(a.price).replace(/[^\d]/g,'')) : Infinity;
+        const pb = b && (b.price || b.price === 0) ? Number(String(b.price).replace(/[^\d]/g,'')) : Infinity;
+        return (priceSortMode === 'asc') ? (pa - pb) : (pb - pa);
+      });
+    }
+
+    for(const bc of barcodes) grid.appendChild(makeCard(s.size, bc, false));
     contentEl.appendChild(grid);
   }
 }
+
 function renderSize(sizeStr){
   contentEl.innerHTML = '';
   contentEl.appendChild(renderActionsBar());
   const s = manifest.sizes.find(x=>String(x.size)===String(sizeStr));
   if(!s){ contentEl.innerHTML='<div class="muted">Không có size này</div>'; return; }
-  const grid=document.createElement('div'); grid.className='grid';
-  for(const bc of s.barcodes) grid.appendChild(makeCard(s.size, bc, false));
+
+  const grid = document.createElement('div'); grid.className='grid';
+  let barcodes = Array.isArray(s.barcodes) ? s.barcodes.slice() : [];
+  if(priceSortMode){
+    barcodes.sort((a,b)=>{
+      const pa = a && (a.price || a.price === 0) ? Number(String(a.price).replace(/[^\d]/g,'')) : Infinity;
+      const pb = b && (b.price || b.price === 0) ? Number(String(b.price).replace(/[^\d]/g,'')) : Infinity;
+      return (priceSortMode === 'asc') ? (pa - pb) : (pb - pa);
+    });
+  }
+  for(const bc of barcodes) grid.appendChild(makeCard(s.size, bc, false));
   contentEl.appendChild(grid);
 }
 
 /* Sort & render "All" by price */
 function applyPriceSortAndRender(mode) {
-  // build array of { size, barcode, price, images }
-  const arr = [];
-  for (const s of manifest.sizes) {
-    for (const b of s.barcodes) {
-      const priceVal = b && (b.price || b.price === 0) ? Number(String(b.price).replace(/[^\d]/g,'')) : Infinity;
-      arr.push({ size: s.size, barcodeObj: b, price: priceVal });
-    }
-  }
-  arr.sort((a,b)=> (mode === 'asc') ? (a.price - b.price) : (b.price - a.price));
-  // render
-  contentEl.innerHTML = '';
-  contentEl.appendChild(renderActionsBar());
-  const grid=document.createElement('div'); grid.className='grid';
-  for(const it of arr){ grid.appendChild(makeCard(it.size, it.barcodeObj, false)); }
-  contentEl.appendChild(grid);
+  // set mode và re-render theo tab hiện hành
+  priceSortMode = mode;
+  renderAccording();
 }
-
 /* RENDER ADD: full behaviour with requested tweaks */
 function renderAdd(){
   contentEl.innerHTML = '';
