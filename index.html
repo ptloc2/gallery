@@ -151,20 +151,24 @@ img{ max-width:100%; display:block }
 <div id="modal" class="modal" role="dialog" aria-hidden="true">
   <div class="modal-content">
     <div class="modal-header">
+  <!-- LEFT: title + price + inline edit row (hidden) -->
   <div id="modalHeaderLeft" style="display:flex; flex-direction:column; gap:6px;">
     <div style="font-weight:700"><span id="modalTitle"></span></div>
-    <div style="color:#666;font-size:13px">Price: <span id="modalPrice">—</span></div>
-  </div>
-
-  <div id="modalHeaderRight" style="display:flex; gap:8px; align-items:center;">
-    <button id="changePriceBtn" class="btn">Thay giá</button>
-
-    <div id="priceEditRow" style="display:none; gap:8px; align-items:center;">
-      <input id="modalNewPrice" type="text" placeholder="Nhập giá mới" style="padding:8px;border-radius:8px;border:1px solid #ddd;min-width:140px;">
-      <button id="savePriceBtn" class="btn primary">Lưu</button>
-      <button id="cancelPriceBtn" class="btn">Hủy</button>
+    <div style="color:#666;font-size:13px">
+      Price: <span id="modalPrice">—</span>
     </div>
 
+    <!-- EDIT ROW: xuất hiện ngay dưới Price khi bấm "Thay giá" -->
+    <div id="priceEditRowHeader" style="display:none; margin-top:6px; gap:8px; align-items:center;">
+      <input id="modalNewPriceHeader" type="text" placeholder="Nhập giá mới" style="padding:8px;border-radius:8px;border:1px solid #ddd;min-width:160px;">
+      <button id="savePriceBtnHeader" class="btn primary">Lưu</button>
+      <button id="cancelPriceBtnHeader" class="btn">Hủy</button>
+    </div>
+  </div>
+
+  <!-- RIGHT: Thay giá button + đóng -->
+  <div id="modalHeaderRight" style="display:flex; gap:8px; align-items:center;">
+    <button id="changePriceBtn" class="btn">Thay giá</button>
     <button id="modalClose" class="btn">Đóng</button>
   </div>
 </div>
@@ -396,7 +400,7 @@ function makeCard(size, bc, withCheckbox=false){
 }
 
 /* open details */
-// helper format/unformat (nếu chưa có)
+// helper format/unformat nếu chưa có (giữ lại nếu đã tồn tại)
 function formatMoney(val){
   if(val === null || val === undefined || val === '') return '—';
   const s = String(val).replace(/[^\d]/g,'');
@@ -407,38 +411,40 @@ function unformatMoney(s){
   return String(s||'').replace(/[^\d]/g,'').trim();
 }
 
-// Replace existing openDetails with this:
+// mở modal chi tiết, với editPrice nằm ngay dưới Price:...
 async function openDetails(size, bc){
-  // Fill header title & price
+  // header elements
   const titleEl = document.getElementById('modalTitle');
   const priceEl = document.getElementById('modalPrice');
+  const changeBtn = document.getElementById('changePriceBtn');
+  const priceEditRow = document.getElementById('priceEditRowHeader');
+  const newPriceInput = document.getElementById('modalNewPriceHeader');
+  const saveBtn = document.getElementById('savePriceBtnHeader');
+  const cancelBtn = document.getElementById('cancelPriceBtnHeader');
+
+  // set title + price
   titleEl.textContent = `${size} — ${bc.code}`;
   priceEl.textContent = formatMoney(bc.price);
 
-  // Ensure edit row hidden by default
-  const priceEditRow = document.getElementById('priceEditRow');
-  const changeBtn = document.getElementById('changePriceBtn');
-  const saveBtn = document.getElementById('savePriceBtn');
-  const cancelBtn = document.getElementById('cancelPriceBtn');
-  const newPriceInput = document.getElementById('modalNewPrice');
-
+  // ensure edit area hidden & prefilled
   priceEditRow.style.display = 'none';
   newPriceInput.value = bc.price ? unformatMoney(bc.price) : '';
 
-  // wire up change button: show edit row
+  // wire: show edit row under Price
   changeBtn.onclick = () => {
     priceEditRow.style.display = 'flex';
+    // small visual: focus and select
     newPriceInput.focus();
     newPriceInput.select();
   };
 
-  // cancel: hide and restore
+  // cancel
   cancelBtn.onclick = () => {
     priceEditRow.style.display = 'none';
     newPriceInput.value = bc.price ? unformatMoney(bc.price) : '';
   };
 
-  // save behavior
+  // save: send to worker (complete-upload) and update UI
   saveBtn.onclick = async () => {
     const raw = unformatMoney(newPriceInput.value || '');
     if(!raw){
@@ -470,11 +476,14 @@ async function openDetails(size, bc){
         const txt = await resp.text().catch(()=>resp.statusText);
         throw new Error(txt || ('Status ' + resp.status));
       }
-      // update UI & client manifest
+      // update local bc.price and UI
       bc.price = raw;
       priceEl.textContent = formatMoney(raw);
       priceEditRow.style.display = 'none';
+      // refresh manifest client
       try { await fetchManifest(); } catch(e){ console.warn('fetchManifest after price update failed', e); }
+      // if current view is size or all, re-render so sorting updates
+      renderAccording();
       alert('Đã cập nhật giá');
     } catch (err) {
       console.error('Save price error', err);
@@ -485,7 +494,7 @@ async function openDetails(size, bc){
     }
   };
 
-  // render images in modalBody
+  // render images in modal body
   modalBody.innerHTML = '';
   const imgs = bc.images || [];
   const div = document.createElement('div'); div.className='detail-grid';
@@ -502,7 +511,7 @@ async function openDetails(size, bc){
   // show modal
   modal.classList.add('open'); modal.setAttribute('aria-hidden','false');
 
-  // ensure the close button works as before
+  // ensure close works (existing button has id modalClose)
   document.getElementById('modalClose').onclick = ()=>{ modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); };
 }
 
