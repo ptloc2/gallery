@@ -191,7 +191,8 @@ img{ max-width:100%; display:block }
 
 <script>
 /* CONFIG */
-const WORKER_BASE = "https://test.lapproak0.workers.dev";
+const R2_PUBLIC_BASE = "https://pub-9a763a2453ba41939860c4caded896a0.r2.dev";
+const WORKER_BASE = "https://shoes-worker.lapproak0.workers.dev";
 const PREFIX = "Shoes";
 
 /* DOM */
@@ -221,7 +222,7 @@ let manifestMap = {};
 let activeTab = 'all';
 let selectedItems = new Set();
 let multiSelectMode = false;
-let priceSortMode = null; // 'asc' | 'desc' | null
+let priceSortMode = 'asc'; // 'asc' | 'desc' | null
 
 /* session admin key */
 function getAdminKeySession() {return sessionStorage.getItem('admin_key_v1') || null;}
@@ -373,7 +374,7 @@ function makeCard(size, bc, withCheckbox=false){
   const thumbName = (Array.isArray(bc.images) && bc.images.find(x=>/thumb/i.test(x))) || (Array.isArray(bc.images)? bc.images[0] : null) || 'thumb.jpeg';
   const encSize = encodeURIComponent(String(size).trim());
   const encCode = encodeURIComponent(String(bc.code).trim());
-  const src = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
+  const src = `${R2_PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
 
   const wrap = document.createElement('div'); wrap.className='thumb-wrap';
   const img = document.createElement('img'); img.src = src; img.alt = bc.code;
@@ -514,7 +515,7 @@ async function openDetails(size, bc){
   for(const fn of imgs){
     const imWrap = document.createElement('div');
     const im = document.createElement('img');
-    im.src = `${WORKER_BASE}/${PREFIX}/${encodeURIComponent(String(size).trim())}/${encodeURIComponent(String(bc.code).trim())}/${encodeURIComponent(fn)}`;
+    im.src = `${R2_PUBLIC_BASE}/${PREFIX}/${encodeURIComponent(String(size).trim())}/${encodeURIComponent(String(bc.code).trim())}/${encodeURIComponent(fn)}`;
     im.style.width='100%'; im.style.height='100%'; im.style.objectFit='cover';
     imWrap.appendChild(im);
     div.appendChild(imWrap);
@@ -546,8 +547,8 @@ function renderActionsBar(){
     sortWrap.className = 'sort-inline';
     const sortSel = document.createElement('select');
     sortSel.className = 'select-small';
-    const optAsc = document.createElement('option'); optAsc.value = 'asc'; optAsc.textContent = 'Từ thấp → cao';
-    const optDesc = document.createElement('option'); optDesc.value = 'desc'; optDesc.textContent = 'Từ cao → thấp';
+    const optAsc = document.createElement('option'); optAsc.value = 'asc'; optAsc.textContent = 'Giá tăng dần';
+    const optDesc = document.createElement('option'); optDesc.value = 'desc'; optDesc.textContent = 'Giá giảm dần';
     sortSel.appendChild(optAsc);
     sortSel.appendChild(optDesc);
     // default to asc if priceSortMode not set
@@ -709,7 +710,7 @@ function renderAdd(){
   const thead = document.createElement('thead'); thead.innerHTML = `<tr><th>Thumb</th><th>Barcode</th><th>Size</th><th>Price</th><th>Details</th><th>Action</th></tr>`; table.appendChild(thead);
   const tbody = document.createElement('tbody'); table.appendChild(tbody); tableWrap.appendChild(table); container.appendChild(tableWrap);
 
-  const folderLabel = document.createElement('div'); folderLabel.className='muted'; folderLabel.style.marginTop='8px'; folderLabel.textContent='Optional: chọn folder "Shoes" (desktop Chrome/Edge only)';
+  const folderLabel = document.createElement('div'); folderLabel.className='muted'; folderLabel.style.marginTop='8px'; folderLabel.textContent='Optional: chọn folder "Shoes"';
   const folderInput = document.createElement('input'); folderInput.type='file'; folderInput.webkitdirectory=true; folderInput.directory=true; folderInput.multiple=true; folderInput.style.display='block'; folderInput.style.marginTop='8px';
   container.appendChild(folderLabel); container.appendChild(folderInput);
 
@@ -923,7 +924,7 @@ async function shareMultipleImages(size, barcodeObj){
     showModal('Chuẩn bị chia sẻ', '<div id="prepareMsg">Đang lấy ảnh, vui lòng chờ…</div>');
     const encSize = encodeURIComponent(String(size).trim());
     const encCode = encodeURIComponent(String(barcodeObj.code).trim());
-    const urls = (barcodeObj.images || []).map(f => `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(f)}`);
+    const urls = (barcodeObj.images || []).map(f => `${R2_PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(f)}`);
     const files = [];
     for(const u of urls){
       try{
@@ -951,10 +952,9 @@ function handleScroll(){ const y = window.scrollY || window.pageYOffset || docum
 window.addEventListener('scroll', handleScroll, { passive: true });
 
 /* init */
-async function init(){ await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; handleScroll(); }
+async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; handleScroll(); renderAccording();}
 init();
 
 </script>
 </body>
 </html>
-
