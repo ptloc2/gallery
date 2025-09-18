@@ -921,29 +921,41 @@ refreshBtn.onclick = async ()=> { try{ const key = await promptAndValidateAdminK
 /* share single card */
 async function shareMultipleImages(size, barcodeObj){
   try{
+    // if you want to avoid fetching blobs (and instead share URLs), you can use navigator.share({url: ...})
+    // but to share images to Photos, we need File objects -> fetch blobs.
     showModal('Chuẩn bị chia sẻ', '<div id="prepareMsg">Đang lấy ảnh, vui lòng chờ…</div>');
     const encSize = encodeURIComponent(String(size).trim());
     const encCode = encodeURIComponent(String(barcodeObj.code).trim());
     const urls = (barcodeObj.images || []).map(f => `${R2_PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(f)}`);
     const files = [];
-    for(const u of urls){
-      try{
-        const r = await fetch(u, { mode: 'cors' });
-        if(!r.ok){ console.warn('Fetch failed', r.status, u); continue; }
+    for (const u of urls) {
+      try {
+        const r = await fetch(u, { mode: 'cors' }); // requires R2 CORS allow
+        if (!r.ok) { console.warn('Fetch failed', r.status, u); continue; }
         const blob = await r.blob();
         const fname = decodeURIComponent(u.split('/').pop());
         files.push(new File([blob], fname, { type: blob.type }));
-      } catch(e){ console.warn('fetch error', e, u); continue; }
+      } catch (e) {
+        console.warn('fetch error', e, u);
+        continue;
+      }
     }
     document.getElementById('modalClose').click();
-    if(files.length === 0) return alert('Không thu thập được file nào để chia sẻ');
+    if (files.length === 0) return alert('Không thu thập được file nào để chia sẻ');
+    // now try native share with files
     try {
-      if(navigator.canShare && navigator.canShare({ files })){
+      if (navigator.canShare && navigator.canShare({ files })) {
         await navigator.share({ files, title: 'Images ' + barcodeObj.code });
         return;
       }
-    } catch(err){ console.warn('navigator.share failed:', err); }
-  } catch(err){ console.error('shareMultipleImages error', err); try { document.getElementById('modalClose').click(); } catch(e){} alert('Lỗi khi chia sẻ: ' + (err.message || err)); }
+    } catch (err) { console.warn('navigator.share failed:', err); }
+    // fallback: open each url in new tab so user can save manually
+    for (const u of urls) window.open(u, '_blank');
+  } catch (err) {
+    console.error('shareMultipleImages error', err);
+    try { document.getElementById('modalClose').click(); } catch(e){}
+    alert('Lỗi khi chia sẻ: ' + (err.message || err));
+  }
 }
 
 /* header hide/show: header shown only when at very top */
