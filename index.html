@@ -374,7 +374,7 @@ function makeCard(size, bc, withCheckbox=false){
   const thumbName = (Array.isArray(bc.images) && bc.images.find(x=>/thumb/i.test(x))) || (Array.isArray(bc.images)? bc.images[0] : null) || 'thumb.jpeg';
   const encSize = encodeURIComponent(String(size).trim());
   const encCode = encodeURIComponent(String(bc.code).trim());
-  const src = `${R2_PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
+  const src = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
 
   const wrap = document.createElement('div'); wrap.className='thumb-wrap';
   const img = document.createElement('img'); img.src = src; img.alt = bc.code;
@@ -515,7 +515,7 @@ async function openDetails(size, bc){
   for(const fn of imgs){
     const imWrap = document.createElement('div');
     const im = document.createElement('img');
-    im.src = `${R2_PUBLIC_BASE}/${PREFIX}/${encodeURIComponent(String(size).trim())}/${encodeURIComponent(String(bc.code).trim())}/${encodeURIComponent(fn)}`;
+    im.src = `${WORKER_BASE}/${PREFIX}/${encodeURIComponent(String(size).trim())}/${encodeURIComponent(String(bc.code).trim())}/${encodeURIComponent(fn)}`;
     im.style.width='100%'; im.style.height='100%'; im.style.objectFit='cover';
     imWrap.appendChild(im);
     div.appendChild(imWrap);
