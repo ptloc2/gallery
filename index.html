@@ -963,7 +963,41 @@ async function shareMultipleImages(size, barcodeObj) {
       }
     });
     await Promise.all(runners);
+    // --- sau: await Promise.all(runners);
+// --- đảm bảo 100%: nếu còn thiếu thì cố retry thêm cho tới maxRetriesStrict lần
+const missingNames = names.filter(n => !files.some(f => f.name === String(n).trim()));
+if (missingNames.length > 0) {
+  console.warn('Một số file chưa tải xong, sẽ retry cho:', missingNames);
+  const maxRetriesStrict = 3;
+  for (let r = 0; r < maxRetriesStrict && missingNames.length > 0; r++) {
+    // retry tuần tự hoặc có thể làm concurrency nhỏ
+    await Promise.all(missingNames.map(async (n) => {
+      const f = await fetchWithTimeoutAndRetry(n); // phải return File hoặc null
+      if (f) files.push(f);
+    }));
+    // recalc missing
+    const stillMissing = names.filter(n => !files.some(f => f.name === String(n).trim()));
+    // if unchanged, break early to avoid tight loop
+    if (stillMissing.length === missingNames.length) break;
+    missingNames.length = 0;
+    Array.prototype.push.apply(missingNames, stillMissing);
+  }
+}
 
+// sau các retry: kiểm tra lần cuối, nếu vẫn thiếu -> abort (không mở share)
+const finalMissing = names.filter(n => !files.some(f => f.name === String(n).trim()));
+if (finalMissing.length > 0) {
+  console.error('Không tải đủ các ảnh (vẫn thiếu):', finalMissing);
+  return alert('Không thể tải đủ ảnh. Vui lòng thử lại sau.');
+}
+
+// --- bây giờ chắc chắn files.length === names.length (hoặc ít nhất đã có file tương ứng)
+// optional: sắp lại files theo thứ tự names
+const fileByName = new Map(files.map(f => [f.name, f]));
+const orderedFiles = names.map(n => fileByName.get(String(n).trim())).filter(Boolean);
+
+// cuối cùng gọi navigator.share chắc chắn sau khi mọi file đã OK
+await navigator.share({ files: orderedFiles, title: `Ảnh ${barcodeObj.code || ''}` });
     // (modal removed) thay bằng log
     console.log('shareMultipleImages: thu thập xong', files.length, 'file(s)');
 
