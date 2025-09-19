@@ -931,7 +931,7 @@ async function shareMultipleImages(size, barcodeObj){
     for (const u of urls) {
       try {
         const r = await fetch(u, { mode: 'cors' }); // requires R2 CORS allow
-        if (!r.ok) { console.warn('Fetch failed', r.status, u); continue; }
+        //if (!r.ok) { console.warn('Fetch failed', r.status, u); continue; }
         const blob = await r.blob();
         const fname = decodeURIComponent(u.split('/').pop());
         files.push(new File([blob], fname, { type: blob.type }));
