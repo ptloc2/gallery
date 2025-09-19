@@ -920,169 +920,90 @@ refreshBtn.onclick = async ()=> { try{ const key = await promptAndValidateAdminK
 
 /* share single card */
 // shareMultipleImages - tải nhiều ảnh song song, xử lý retry, fallback, rồi gọi navigator.share
-async function shareMultipleImages(size, barcodeObj, opts = {}) {
-  const WORKER_BASE = opts.workerBase || 'https://shoes-worker.lapproak0.workers.dev';
-  const R2_PUBLIC_BASE = opts.r2Base || 'https://pub-9a763a2453ba41939860c4caded896a0.r2.dev';
-  const PREFIX = opts.prefix || 'Shoes';
-  const CONCURRENCY = Number(opts.concurrency || 4);
-  const RETRIES = Number(opts.retries || 2);
-  const MAX_TOTAL_BYTES = Number(opts.maxTotalBytes || 25 * 1024 * 1024); // 25 MB
+async function shareMultipleImages(size, barcodeObj) {
+  try {
+    showModal('Chuẩn bị chia sẻ', '<div id="prepareMsg">Đang lấy ảnh…</div>');
 
-  // helpers
-  const enc = v => encodeURIComponent(String(v).trim());
-  const sanitizeName = n => String(n || 'file').trim().replace(/\s+/g, ' ');
+    const encSize = encodeURIComponent(String(size).trim());
+    const encCode = encodeURIComponent(String(barcodeObj.code || '').trim());
+    const names = Array.isArray(barcodeObj.images) ? barcodeObj.images.slice() : [];
+    if (names.length === 0) {
+      document.getElementById('modalClose').click();
+      return alert('Không có ảnh để chia sẻ');
+    }
 
-  // build candidate URLs for each filename: worker first, then direct r2
-  function buildUrls(fname) {
-    const f = sanitizeName(fname);
-    const encSize = enc(size);
-    const encCode = enc(barcodeObj.code || barcodeObj.id || '');
-    const encFile = encodeURIComponent(f);
-    const path = `/${PREFIX}/${encSize}/${encCode}/${encFile}`;
-    return [
-      `${WORKER_BASE}${path}`,
-      `${R2_PUBLIC_BASE}${path}`
-    ];
-  }
+    const concurrency = 4;
+    const files = [];
+    let idx = 0;
 
-  // fetch with retries trying candidate urls in order (worker -> r2)
-  async function fetchWithRetries(candidates) {
-    for (const url of candidates) {
-      for (let attempt = 1; attempt <= RETRIES; attempt++) {
-        try {
-          const res = await fetch(url, { mode: 'cors' });
-          if (!res.ok) {
-            // non-OK, break retry for this url and try next candidate
-            console.warn(`fetch ${url} returned ${res.status}`);
-            break;
-          }
-          const blob = await res.blob();
-          return { ok: true, blob, url };
-        } catch (err) {
-          // TypeError often means CORS or network error
-          console.warn(`fetch attempt ${attempt} failed for ${url}`, err);
-          // small backoff
-          await new Promise(r => setTimeout(r, 300 * attempt));
-          // if last attempt and still fail, try next candidate
+    // fetch 1 file via worker, return File or null
+    async function fetchOne(name) {
+      const fn = String(name || '').trim();
+      const url = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(fn)}`;
+      try {
+        const res = await fetch(url, { mode: 'cors' });
+        if (!res.ok) {
+          console.warn('fetch failed', res.status, url);
+          return null;
         }
+        const blob = await res.blob();
+        return new File([blob], fn || (decodeURIComponent(url.split('/').pop())), { type: blob.type || 'application/octet-stream' });
+      } catch (e) {
+        console.warn('fetch error', url, e);
+        return null;
       }
     }
-    return { ok: false };
-  }
 
-  // run tasks with concurrency limit
-  async function runPool(items, workerFn, concurrency) {
-    let i = 0;
-    const results = new Array(items.length);
-    const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    // simple concurrency pool
+    const runners = Array.from({ length: Math.min(concurrency, names.length) }, async () => {
       while (true) {
-        const idx = i++;
-        if (idx >= items.length) break;
-        results[idx] = await workerFn(items[idx], idx);
+        const i = idx++;
+        if (i >= names.length) break;
+        const f = await fetchOne(names[i]);
+        if (f) files.push(f);
       }
     });
     await Promise.all(runners);
-    return results;
-  }
 
-  try {
-    const images = Array.isArray(barcodeObj.images) ? barcodeObj.images : [];
-    if (images.length === 0) {
-      alert('Không tìm thấy ảnh để chia sẻ');
-      return { ok: false, reason: 'no_images' };
-    }
+    // close modal UI
+    document.getElementById('modalClose').click();
 
-    // prepare candidates list
-    const tasks = images.map(fn => ({ fname: String(fn || '').trim(), candidates: buildUrls(fn) }));
-
-    // fetch in parallel (limited)
-    const fetchResults = await runPool(tasks, async (task) => {
-      if (!task.fname) return { ok: false, fname: task.fname, error: 'empty_name' };
-      const res = await fetchWithRetries(task.candidates);
-      if (!res.ok) return { ok: false, fname: task.fname };
-      return { ok: true, fname: task.fname, blob: res.blob, url: res.url };
-    }, CONCURRENCY);
-
-    // build File objects, compute total size
-    const files = [];
-    let totalBytes = 0;
-    const failures = [];
-    for (const r of fetchResults) {
-      if (r && r.ok && r.blob) {
-        const name = sanitizeName(r.fname);
-        files.push(new File([r.blob], name, { type: r.blob.type || 'application/octet-stream' }));
-        totalBytes += r.blob.size || 0;
-      } else {
-        failures.push(r && r.fname ? r.fname : '(unknown)');
-      }
-    }
-
-    // If no files succeeded, fallback to share URLs/text
     if (files.length === 0) {
-      const urls = images.map(fn => `${WORKER_BASE}/${PREFIX}/${enc(size)}/${enc(barcodeObj.code || barcodeObj.id || '')}/${encodeURIComponent(sanitizeName(fn))}`);
-      const text = `Không thể lấy file để chia sẻ. Link:\n` + urls.join('\n');
+      // fallback: share worker URLs as text
+      const urls = names.map(n => `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(n).trim())}`);
       try {
-        await navigator.share({ title: 'Ảnh', text });
-        return { ok: true, shared: 'text', failures };
+        await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: urls.join('\n') });
+        return;
       } catch (e) {
-        console.warn('navigator.share fallback failed', e);
-        alert('Không thể chia sẻ (không có file).');
-        return { ok: false, reason: 'share_failed', error: String(e), failures };
+        return alert('Không thu thập được file nào để chia sẻ');
       }
     }
 
-    // If total size too big for sharing as files, fallback to share URLs/text
-    if (totalBytes > MAX_TOTAL_BYTES) {
-      console.warn('Total files size too big:', totalBytes);
-      const firstUrl = `${WORKER_BASE}/${PREFIX}/${enc(size)}/${enc(barcodeObj.code || barcodeObj.id || '')}/${encodeURIComponent(sanitizeName(images[0]))}`;
-      // try share first URL and note large size
-      try {
-        await navigator.share({
-          title: 'Ảnh (kích thước lớn)',
-          text: `Ảnh lớn, không thể chia sẻ trực tiếp. Mở link: ${firstUrl}`
-        });
-        return { ok: true, shared: 'url', reason: 'too_large', totalBytes, failures };
-      } catch (e) {
-        console.warn('share url fallback failed', e);
-        alert('File quá lớn để chia sẻ. Hãy thử giảm kích thước.');
-        return { ok: false, reason: 'too_large_and_share_failed', error: String(e), totalBytes, failures };
-      }
-    }
-
-    // check navigator.canShare if available
+    // check canShare if available
     try {
       if (navigator.canShare && !navigator.canShare({ files })) {
-        console.warn('navigator.canShare reports cannot share these files');
-        // fallback to share url/text
-        const urls = images.map(fn => `${WORKER_BASE}/${PREFIX}/${enc(size)}/${enc(barcodeObj.code || barcodeObj.id || '')}/${encodeURIComponent(sanitizeName(fn))}`);
-        await navigator.share({ title: 'Ảnh', text: urls.join('\n') });
-        return { ok: true, shared: 'text_by_canShare_check', failures };
+        // cannot share files -> fallback to first URL
+        const first = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(names[0]).trim())}`;
+        await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: first });
+        return;
       }
     } catch (e) {
       console.warn('navigator.canShare check error (ignored)', e);
     }
 
-    // finally attempt to share files
+    // attempt share files
     try {
-      await navigator.share({ files, title: `Ảnh ${barcodeObj.code || ''}`, text: barcodeObj.note || '' });
-      return { ok: true, shared: 'files', totalBytes, failures };
-    } catch (err) {
-      console.warn('navigator.share failed with files, trying fallback url/text', err);
-      // fallback: share urls/text
-      const urls = images.map(fn => `${WORKER_BASE}/${PREFIX}/${enc(size)}/${enc(barcodeObj.code || barcodeObj.id || '')}/${encodeURIComponent(sanitizeName(fn))}`);
-      try {
-        await navigator.share({ title: 'Ảnh', text: urls.join('\n') });
-        return { ok: true, shared: 'text_after_share_fail', error: String(err), failures };
-      } catch (e2) {
-        console.warn('final fallback share failed', e2);
-        alert('Chia sẻ thất bại: ' + (e2 && e2.message ? e2.message : String(e2)));
-        return { ok: false, reason: 'final_share_failed', error: String(e2), failures };
-      }
+      await navigator.share({ files, title: `Ảnh ${barcodeObj.code || ''}` });
+    } catch (e) {
+      console.warn('share files failed, fallback to URLs', e);
+      const urls = names.map(n => `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(n).trim())}`);
+      try { await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: urls.join('\n') }); }
+      catch (e2) { alert('Chia sẻ thất bại'); }
     }
-  } catch (outerErr) {
-    console.error('shareMultipleImages error', outerErr);
-    alert('Lỗi khi chuẩn bị chia sẻ: ' + (outerErr && outerErr.message ? outerErr.message : String(outerErr)));
-    return { ok: false, reason: 'exception', error: String(outerErr) };
+  } catch (err) {
+    console.error('shareMultipleImages error', err);
+    try { document.getElementById('modalClose').click(); } catch (e) {}
+    alert('Lỗi khi chia sẻ: ' + (err && err.message ? err.message : String(err)));
   }
 }
 
