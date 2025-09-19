@@ -998,7 +998,7 @@ async function shareMultipleImages(size, barcodeObj) {
       console.warn('share files failed, fallback to URLs', e);
       const urls = names.map(n => `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(n).trim())}`);
       try { await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: urls.join('\n') }); }
-      catch (e2) { alert('Chia sẻ thất bại'); }
+      catch (e2) { }
     }
   } catch (err) {
     console.error('shareMultipleImages error', err);
