@@ -938,7 +938,7 @@ async function shareMultipleImages(size, barcodeObj) {
     // fetch 1 file via worker, return File or null
     async function fetchOne(name) {
       const fn = String(name || '').trim();
-      const url = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(fn)}`;
+      const url = `${R2_PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(fn)}`;
       try {
         const res = await fetch(url, { mode: 'cors' });
         if (!res.ok) {
@@ -1003,7 +1003,7 @@ await navigator.share({ files: orderedFiles, title: `Ảnh ${barcodeObj.code || 
 
     if (files.length === 0) {
       // fallback: share worker URLs as text
-      const urls = names.map(n => `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(n).trim())}`);
+      const urls = names.map(n => `${R2_PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(n).trim())}`);
       try {
         await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: urls.join('\n') });
         return;
@@ -1017,7 +1017,7 @@ await navigator.share({ files: orderedFiles, title: `Ảnh ${barcodeObj.code || 
     try {
       if (navigator.canShare && !navigator.canShare({ files })) {
         // cannot share files -> fallback to first URL
-        const first = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(names[0]).trim())}`;
+        const first = `${R2_PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(names[0]).trim())}`;
         try {
           await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: first });
         } catch (e) {
@@ -1035,7 +1035,7 @@ await navigator.share({ files: orderedFiles, title: `Ảnh ${barcodeObj.code || 
       await navigator.share({ files, title: `Ảnh ${barcodeObj.code || ''}` });
     } catch (e) {
       console.warn('share files failed, fallback to URLs', e);
-      const urls = names.map(n => `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(n).trim())}`);
+      const urls = names.map(n => `${R2_PUBLIC_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(n).trim())}`);
       try { await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: urls.join('\n') }); }
       catch (e2) {
         console.warn('fallback share URLs also failed', e2);
