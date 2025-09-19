@@ -922,13 +922,12 @@ refreshBtn.onclick = async ()=> { try{ const key = await promptAndValidateAdminK
 // shareMultipleImages - tải nhiều ảnh song song, xử lý retry, fallback, rồi gọi navigator.share
 async function shareMultipleImages(size, barcodeObj) {
   try {
-    showModal('Chuẩn bị chia sẻ', '<div id="prepareMsg">Đang lấy ảnh…</div>');
-
+    //console.log('shareMultipleImages: chuẩn bị lấy ảnh...');
     const encSize = encodeURIComponent(String(size).trim());
     const encCode = encodeURIComponent(String(barcodeObj.code || '').trim());
     const names = Array.isArray(barcodeObj.images) ? barcodeObj.images.slice() : [];
     if (names.length === 0) {
-      document.getElementById('modalClose').click();
+      console.warn('Không có ảnh để chia sẻ');
       return alert('Không có ảnh để chia sẻ');
     }
 
@@ -965,8 +964,8 @@ async function shareMultipleImages(size, barcodeObj) {
     });
     await Promise.all(runners);
 
-    // close modal UI
-    document.getElementById('modalClose').click();
+    // (modal removed) thay bằng log
+    console.log('shareMultipleImages: thu thập xong', files.length, 'file(s)');
 
     if (files.length === 0) {
       // fallback: share worker URLs as text
@@ -975,6 +974,7 @@ async function shareMultipleImages(size, barcodeObj) {
         await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: urls.join('\n') });
         return;
       } catch (e) {
+        console.warn('fallback share URLs failed', e);
         return alert('Không thu thập được file nào để chia sẻ');
       }
     }
@@ -984,7 +984,12 @@ async function shareMultipleImages(size, barcodeObj) {
       if (navigator.canShare && !navigator.canShare({ files })) {
         // cannot share files -> fallback to first URL
         const first = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(names[0]).trim())}`;
-        await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: first });
+        try {
+          await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: first });
+        } catch (e) {
+          console.warn('fallback to first URL failed', e);
+          alert('Trình duyệt không hỗ trợ chia sẻ file trực tiếp');
+        }
         return;
       }
     } catch (e) {
@@ -998,11 +1003,12 @@ async function shareMultipleImages(size, barcodeObj) {
       console.warn('share files failed, fallback to URLs', e);
       const urls = names.map(n => `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(String(n).trim())}`);
       try { await navigator.share({ title: `Ảnh ${barcodeObj.code || ''}`, text: urls.join('\n') }); }
-      catch (e2) { }
+      catch (e2) {
+        console.warn('fallback share URLs also failed', e2);
+      }
     }
   } catch (err) {
     console.error('shareMultipleImages error', err);
-    try { document.getElementById('modalClose').click(); } catch (e) {}
     alert('Lỗi khi chia sẻ: ' + (err && err.message ? err.message : String(err)));
   }
 }
