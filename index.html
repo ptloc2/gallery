@@ -25,14 +25,16 @@ body.dark{ background:#111316; color:#d9dee3 }
 
 /* header */
 header{
-  padding:var(--header-padding) 12px calc(var(--header-padding) + env(safe-area-inset-bottom));
-  background:var(--tab-bg);
-  position:sticky; top:0; z-index:60;
-  box-shadow:0 2px 6px rgba(10,10,10,0.06);
-  overflow:hidden;
+  padding: var(--header-padding) 12px calc(var(--header-padding) + env(safe-area-inset-bottom));
+  background: var(--tab-bg);
+  position: sticky; top: 0; z-index: 60;
+  box-shadow: 0 2px 6px rgba(10,10,10,0.06);
+  /* cho panel được hiển thị ra ngoài header */
+  overflow: visible;
   transition: transform 0.22s ease;
   transform: translateY(0);
 }
+
 header.header-hidden{ transform: translateY(-120%); }
 body.dark header{ background:#122028 }
 
@@ -128,15 +130,32 @@ body.dark .modal-content{ background:#0f1315; color:#e6e9eb }
 @media (max-width:480px){ .progress-panel{ width: 92%; right: 4%; } .grid{ grid-template-columns: repeat(3, 1fr); } }
 
 img{ max-width:100%; display:block }
+
+/* --- new more-panel styles --- */
+#more-control { display:inline-block; position:relative; }
+#more-btn { padding:6px 10px; border-radius:8px; border:1px solid rgba(0,0,0,0.08); background:#fff; cursor:pointer; }
+#more-panel { position:absolute; right:0; top:42px; width:200px; background:#fff; border:1px solid rgba(0,0,0,0.08); box-shadow:0 6px 18px rgba(0,0,0,0.08); padding:8px; display:none; flex-direction:column; gap:6px; border-radius:8px; z-index:200; }
+#more-panel button { width:100%; padding:8px 10px; text-align:left; border-radius:6px; border:none; background:#f6f6f6; cursor:pointer; }
+#more-panel button:hover{ background:#eee; }
+#more-control.open #more-panel { display:flex; }
+
 </style>
+<!-- include SheetJS for Excel export -->
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <header id="pageHeader">
   <div class="top-row">
     <div class="search-wrap"><input id="searchInput" class="search-input" placeholder="Tìm theo barcode (VD: 146888) — Enter để tìm" /></div>
     <div class="controls" style="flex:0 0 auto">
-      <button id="themeToggle" class="btn tab-like">Light/Dark</button>
-      <button id="refreshBtn" class="btn tab-like">Refresh</button>
+      <div id="more-control" style="position:relative; display:inline-block;">
+        <button id="more-btn" class="btn tab-like" title="More">⋯</button>
+        <div id="more-panel" aria-hidden="true">
+          <button id="themeToggle" class="btn tab-like">Light/Dark</button>
+          <button id="refreshBtn" class="btn tab-like">Refresh</button>
+          <button id="btn-export-excel" class="btn tab-like">Xuất Excel</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="tabs" class="tabs"></div>
@@ -226,7 +245,7 @@ let priceSortMode = 'asc'; // 'asc' | 'desc' | null
 
 /* session admin key */
 function getAdminKeySession() {return sessionStorage.getItem('admin_key_v1') || null;}
-function setAdminKeySession(key) {if (!key) sessionStorage.removeItem('admin_key_v1');else sessionStorage.setItem('admin_key_v1', key);}
+function setAdminKeySession(key) {if (!key) sessionStorage.removeItem('admin_key_v1');else sessionStorage.setItem('admin_key_v1', key);} 
 async function promptAndValidateAdminKey(){
   const existing = getAdminKeySession(); if (existing) return existing;
   while (true) {
@@ -333,6 +352,99 @@ async function fetchManifest({ forceRefresh=false }={}) {
     console.error(err); logStatus('Không load được manifest: ' + err.message); contentEl.innerHTML='';
   }
 }
+
+/* ----------------- new UI & export Excel logic ----------------- */
+// toggle more panel
+(function(){
+  const moreControl = document.getElementById('more-control');
+  const moreBtn = document.getElementById('more-btn');
+  if(!moreControl || !moreBtn) return;
+  moreBtn.addEventListener('click', (e)=>{ e.stopPropagation(); moreControl.classList.toggle('open'); });
+  document.addEventListener('click', (e)=>{ if(!moreControl.contains(e.target)) moreControl.classList.remove('open'); });
+  document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') moreControl.classList.remove('open'); });
+})();
+
+function flattenManifestToRows(man) {
+  const rows = [];
+  if (!man) return rows;
+  if (Array.isArray(man.sizes)) {
+    for (const s of man.sizes) {
+      for (const b of (s.barcodes || [])) {
+        const code = String(b.code || '').trim();
+        const price = b.price != null ? b.price : null;
+        if (code) rows.push([code, price]);
+      }
+    }
+    return rows;
+  }
+  for (const sizeKey of Object.keys(man)) {
+    const block = man[sizeKey];
+    if (!block || typeof block !== 'object') continue;
+    for (const code of Object.keys(block)) {
+      const entry = block[code];
+      let price = null;
+      if (Array.isArray(entry)) price = null;
+      else if (entry && typeof entry === 'object') price = entry.price != null ? entry.price : null;
+      rows.push([String(code).trim(), price != null ? String(price) : null]);
+    }
+  }
+  return rows;
+}
+
+async function exportExcelFromModel() {
+  try {
+    // ensure manifest up-to-date (non-force)
+    await fetchManifest();
+
+    const rows = flattenManifestToRows(manifest);
+    if (!rows.length) { alert('Không có dữ liệu trong manifest để xuất.'); return; }
+
+    // fetch model.xlsx at same folder level
+    const modelUrl = './model.xlsx';
+    const ab = await fetch(modelUrl).then(r=>{ if(!r.ok) throw new Error('model.xlsx fetch ' + r.status); return r.arrayBuffer(); });
+
+    const wb = XLSX.read(ab, { type: 'array' });
+    const firstSheetName = wb.SheetNames[0];
+    const ws = wb.Sheets[firstSheetName];
+
+    // compute start row (zero-based)
+    const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s:{r:0,c:0}, e:{r:0,c:0} };
+    const startRowZero = range.e.r + 1;
+
+    // write each row: column C (index 2) = code, column G (index 6) = price
+    for (let i = 0; i < rows.length; i++) {
+      const r = startRowZero + i;
+      const code = rows[i][0] || '';
+      const price = rows[i][1] != null ? String(rows[i][1]) : '';
+      const cellC = XLSX.utils.encode_cell({ c: 2, r }); // C
+      const cellG = XLSX.utils.encode_cell({ c: 6, r }); // G
+      ws[cellC] = { t: 's', v: code };
+      ws[cellG] = { t: 's', v: price };
+    }
+
+    // update sheet range
+    const newER = startRowZero + rows.length - 1;
+    const newEC = Math.max(range.e.c || 6, 6);
+    const newRange = { s: { r: Math.min(range.s.r, 0), c: 0 }, e: { r: Math.max(range.e.r, newER), c: newEC } };
+    ws['!ref'] = XLSX.utils.encode_range(newRange);
+
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `export_${PREFIX}_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+
+    document.getElementById('more-control').classList.remove('open');
+  } catch (err) {
+    console.error('exportExcel error', err);
+    alert('Xuất Excel lỗi: ' + (err && err.message ? err.message : String(err)));
+  }
+}
+
+document.getElementById('btn-export-excel').addEventListener('click', exportExcelFromModel);
+
+/* ---------------------------------------------------------------- */
 
 /* tabs */
 function createTabButton(text, key){
@@ -724,8 +836,7 @@ function renderAdd(){
   function addRow(prefill = {}){
     const tr = document.createElement('tr');
     const tdThumb = document.createElement('td'); const inputThumb = document.createElement('input'); inputThumb.type='file'; inputThumb.accept='image/*'; const thumbPreview = document.createElement('img'); thumbPreview.className='small-thumb'; thumbPreview.alt='thumb'; thumbPreview.style.display='none'; tdThumb.appendChild(inputThumb); tdThumb.appendChild(thumbPreview);
-
-    inputThumb.onchange = (e) => { const f = e.target.files && e.target.files[0]; if(f){ thumbPreview.src = URL.createObjectURL(f); thumbPreview.style.display='block'; tr.__prefilledThumbFile = null; } else { thumbPreview.src = ''; thumbPreview.style.display='none'; } };
+ inputThumb.onchange = (e) => { const f = e.target.files && e.target.files[0]; if(f){ thumbPreview.src = URL.createObjectURL(f); thumbPreview.style.display='block'; tr.__prefilledThumbFile = null; } else { thumbPreview.src = ''; thumbPreview.style.display='none'; } };
 
     const tdBarcode = document.createElement('td'); const inputBarcode = document.createElement('input'); inputBarcode.type='text'; inputBarcode.placeholder='146888'; if(prefill.barcode) inputBarcode.value = prefill.barcode; tdBarcode.appendChild(inputBarcode);
 
@@ -738,7 +849,7 @@ function renderAdd(){
     if(prefill.price) priceInput.value = String(prefill.price);
     tdPrice.appendChild(priceInput);
 
-    const tdDetails = document.createElement('td'); const inputDetails = document.createElement('input'); inputDetails.type = 'file'; inputDetails.accept = 'image/*'; inputDetails.multiple = true; const detailsPreviewWrap = document.createElement('div'); detailsPreviewWrap.style.display='flex'; detailsPreviewWrap.style.gap='6px'; detailsPreviewWrap.style.marginTop='6px'; tdDetails.appendChild(inputDetails); tdDetails.appendChild(detailsPreviewWrap);
+    const tdDetails = document.createElement('td'); const inputDetails = document.createElement('input'); inputDetails.accept = 'image/*'; inputDetails.multiple = true; inputDetails.type = 'file'; const detailsPreviewWrap = document.createElement('div'); detailsPreviewWrap.style.display='flex'; detailsPreviewWrap.style.gap='6px'; detailsPreviewWrap.style.marginTop='6px'; tdDetails.appendChild(inputDetails); tdDetails.appendChild(detailsPreviewWrap);
     inputDetails.onchange = (e) => { detailsPreviewWrap.innerHTML = ''; const files = Array.from(e.target.files || []); for(const f of files){ const img = document.createElement('img'); img.src = URL.createObjectURL(f); img.className='small-thumb'; detailsPreviewWrap.appendChild(img); } tr.__prefilledFiles = null; };
     if(prefill.detailFiles && prefill.detailFiles.length){ for(const f of prefill.detailFiles){ const img = document.createElement('img'); img.src = URL.createObjectURL(f); img.className='small-thumb'; detailsPreviewWrap.appendChild(img); } tr.__prefilledFiles = prefill.detailFiles.slice(); }
 
@@ -768,7 +879,7 @@ function renderAdd(){
       const priceInput = r.querySelector('td:nth-child(4) input[type="text"]');
       const inputDetails = r.querySelector('td:nth-child(5) input[type="file"][multiple]');
       const barcode = (inputBarcode && inputBarcode.value || '').trim();
-      const sizeVal = sizeSelect ? sizeSelect.value : (newSizeInput ? newSizeInput.value : '');
+const sizeVal = sizeSelect ? sizeSelect.value : (newSizeInput ? newSizeInput.value : '');
       const priceVal = priceInput ? (priceInput.value || '').trim() : '';
       return { tr:r, inputThumb, inputBarcode, barcode, sizeSelect, sizeVal, newSizeInput, inputDetails, priceInput, priceVal };
     });
@@ -806,8 +917,7 @@ function renderAdd(){
       for(const f of detailsFiles){ const p = await convertImageFileToJpeg(f); prepared.push({ file: p, remoteName: p.name }); }
       groups.push({ size: effectiveSize, barcode: ri.barcode, prepared, price: ri.priceVal || '' });
     }
-
-    if(groups.length === 0) return alert('Không có hàng để upload sau khi áp dụng skip rules');
+if(groups.length === 0) return alert('Không có hàng để upload sau khi áp dụng skip rules');
     try{
       await uploadPreparedGroups(groups, key);
       let added = false; for(const g of groups){ if(!manifestMap[g.size]){ manifest.sizes.push({ size: String(g.size), barcodes: [] }); added = true; } }
@@ -847,10 +957,10 @@ function renderAdd(){
     for(const size of Object.keys(groupsMap)){
       for(const barcode of Object.keys(groupsMap[size])){
         const items = groupsMap[size][barcode];
-        const detailFiles = items.filter(x=>!/^price\.txt$/i.test(x.relPath) && !/^thumb/i.test(x.relPath)).map(x=>x.file);
+        const detailFiles = items.filter(x=>!/^(price\.txt)$/i.test(x.relPath) && !/^thumb/i.test(x.relPath)).map(x=>x.file);
         const t = items.find(x=>/thumb\./i.test(x.relPath));
         const thumbFile = t ? t.file : (items[0] && items[0].file);
-        // detect price.txt
+ // detect price.txt
         const p = items.find(x=>/^price\.txt$/i.test(x.relPath));
         let detectedPrice = '';
         if(p){
@@ -870,7 +980,7 @@ function renderAdd(){
 }
 
 /* helper functions used by add tab upload */
-function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c])); }
 
 function updateBodyMultiselectClass(){ if(multiSelectMode) document.body.classList.add('body-multiselect'); else document.body.classList.remove('body-multiselect'); }
 
@@ -893,7 +1003,7 @@ async function uploadPreparedGroups(preparedGroups, adminKey){
     if(!manifestMap[g.size]){ manifest.sizes.push({ size: String(g.size), barcodes: [] }); buildManifestMap(); buildTabs(); }
     const groupEl = createGroupProgress(gid, `${g.size} — ${g.barcode}`);
     const groupTotal = g.prepared.reduce((s,p)=>s + p.file.size, 0);
-    let groupLoaded = 0;
+let groupLoaded = 0;
     const fileObjs = [];
     for(const p of g.prepared) fileObjs.push(addFileStatus(groupEl.fileList, p.remoteName));
     const filenames = g.prepared.map(p=>p.remoteName);
@@ -932,7 +1042,7 @@ try {
 
   // mark each file as fully uploaded and update loaded counters to full size
   for (let idx = 0; idx < n; idx++) {
-    const p = g.prepared[idx];
+ const p = g.prepared[idx];
     const fileObj = fileObjs[idx];
     // ensure final progress shows full size
     updateFileProgress(fileObj, p.file.size, p.file.size);
