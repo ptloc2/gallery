@@ -416,6 +416,7 @@ async function exportExcelFromModel() {
       const r = startRowZero + i;
       const code = rows[i][0] || '';
       const price = rows[i][1] != null ? String(rows[i][1]) : '';
+      ws[XLSX.utils.encode_cell({ c: 4, r })] = { t: 's', v: 'MyFixedValue' }; // E
       const cellC = XLSX.utils.encode_cell({ c: 2, r }); // C
       const cellG = XLSX.utils.encode_cell({ c: 6, r }); // G
       ws[cellC] = { t: 's', v: code };
