@@ -192,7 +192,7 @@ img{ max-width:100%; display:block }
 <script>
 /* CONFIG */
 const R2_PUBLIC_BASE = "https://pub-9a763a2453ba41939860c4caded896a0.r2.dev";
-const WORKER_BASE = "https://test.lapproak0.workers.dev";
+const WORKER_BASE = "https://shoes-worker.lapproak0.workers.dev";
 const PREFIX = "Shoes";
 
 /* DOM */
@@ -877,6 +877,10 @@ function updateBodyMultiselectClass(){ if(multiSelectMode) document.body.classLi
 /* UPLOAD utilities (presign + upload flow) */
 function uploadFileWithProgress(url, file, onProgress){ return new Promise((resolve, reject) => { const xhr = new XMLHttpRequest(); xhr.open('PUT', url, true); try { xhr.setRequestHeader('Content-Type', file.type); } catch(e){} xhr.upload.onprogress = (ev) => { if (ev.lengthComputable && typeof onProgress === 'function') onProgress(ev.loaded, ev.total); }; xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) resolve({ ok:true, status: xhr.status, response: xhr.responseText }); else reject(new Error('Upload failed: ' + xhr.status + ' ' + xhr.statusText + ' - ' + xhr.responseText)); }; xhr.onerror = () => reject(new Error('Network error during upload')); xhr.send(file); }); }
 
+async function uploadWithRetry(url, file, onProgress, attempts = 3) { for (let a = 1; a <= attempts; a++) { try { return await uploadFileWithProgress(url, file, onProgress); } catch (err) { if (a === attempts) throw err; await new Promise(r => setTimeout(r, 300 * a)); } } }
+
+async function uploadPool(items, concurrency = 4) { let i = 0; const errors = []; const runners = Array.from({length: Math.min(concurrency, items.length)}, async () => { while (true) { const idx = i++; if (idx >= items.length) break; const it = items[idx]; try { await uploadWithRetry(it.url, it.file, it.onProgress); } catch (err) { console.warn('Upload failed for', it.url, err); errors.push({ idx, err }); } } }); await Promise.all(runners); if (errors.length) throw errors; }
+
 async function convertImageFileToJpeg(file, maxWidth=1600, quality=0.80){ if(!file.type || !file.type.startsWith('image/')) return file; try{ const imgBitmap = await createImageBitmap(file); const scale = imgBitmap.width > maxWidth ? maxWidth / imgBitmap.width : 1; const w = Math.round(imgBitmap.width * scale); const h = Math.round(imgBitmap.height * scale); const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d'); ctx.drawImage(imgBitmap, 0, 0, w, h); const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality)); const newName = (file.name.replace(/\.[^/.]+$/, '') || 'image') + '.jpeg'; return new File([blob], newName, { type: 'image/jpeg' }); } catch(e){ console.warn('convertImageFileToJpeg failed', e); return file; } }
 
 async function uploadPreparedGroups(preparedGroups, adminKey){
@@ -896,10 +900,65 @@ async function uploadPreparedGroups(preparedGroups, adminKey){
     const presignRes = await fetch(WORKER_BASE + '/presign-upload', { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': adminKey }, body: JSON.stringify({ size: g.size, barcode: g.barcode, files: filenames, expiresIn: 3600 })});
     if(!presignRes.ok){ const t = await presignRes.text().catch(()=>presignRes.statusText); throw new Error('Presign failed: ' + t); }
     const presignJson = await presignRes.json(); const urls = presignJson.urls || {};
-    for(let i=0;i<g.prepared.length;i++){
-      const p = g.prepared[i]; const fileObj = fileObjs[i]; const url = urls[p.remoteName]; if(!url) throw new Error('Missing presigned URL for ' + p.remoteName);
-      try{ await uploadFileWithProgress(url, p.file, (loaded, total)=>{ updateFileProgress(fileObj, loaded, total); const groupEstimate = groupLoaded + loaded; updateGroupProgress(groupEl, Math.min(groupEstimate, groupTotal), groupTotal); updateOverallProgress(overallLoaded + loaded, overallTotal); }); updateFileProgress(fileObj, p.file.size, p.file.size); groupLoaded += p.file.size; overallLoaded += p.file.size; updateGroupProgress(groupEl, groupLoaded, groupTotal); updateOverallProgress(overallLoaded, overallTotal); fileObj.statusEl.textContent = 'OK'; } catch(e){ fileObj.statusEl.textContent = 'ERR'; console.error('Upload file error', e); throw e; }
+// --- START: replacement parallel upload block ---
+const n = g.prepared.length;
+const fileLoaded = new Array(n).fill(0); // track per-file uploaded bytes for delta
+// prepare items for pool
+const items = g.prepared.map((p, idx) => {
+  const url = urls[p.remoteName];
+  if (!url) throw new Error('Missing presigned URL for ' + p.remoteName);
+  const fileObj = fileObjs[idx];
+  return {
+    idx,
+    url,
+    file: p.file,
+    onProgress: (loaded, total) => {
+      // delta since last progress event for this file
+      const delta = Math.max(0, loaded - fileLoaded[idx]);
+      fileLoaded[idx] = loaded;
+      // update UI using delta
+      updateFileProgress(fileObj, loaded, total);
+      groupLoaded += delta;
+      overallLoaded += delta;
+      updateGroupProgress(groupEl, Math.min(groupLoaded, groupTotal), groupTotal);
+      updateOverallProgress(overallLoaded, overallTotal);
     }
+  };
+});
+
+try {
+  // run concurrent uploads (tune concurrency number: 4 is a good start)
+  await uploadPool(items, 4);
+
+  // mark each file as fully uploaded and update loaded counters to full size
+  for (let idx = 0; idx < n; idx++) {
+    const p = g.prepared[idx];
+    const fileObj = fileObjs[idx];
+    // ensure final progress shows full size
+    updateFileProgress(fileObj, p.file.size, p.file.size);
+    // if fileLoaded[idx] < size, add remaining delta
+    const remaining = Math.max(0, p.file.size - fileLoaded[idx]);
+    if (remaining > 0) {
+      groupLoaded += remaining;
+      overallLoaded += remaining;
+      updateGroupProgress(groupEl, Math.min(groupLoaded, groupTotal), groupTotal);
+      updateOverallProgress(overallLoaded, overallTotal);
+    }
+    fileObj.statusEl.textContent = 'OK';
+  }
+} catch (errs) {
+  // mark failed ones (errs is array of {idx, err}) and rethrow to abort group
+  if (Array.isArray(errs)) {
+    for (const e of errs) {
+      const fo = fileObjs[e.idx];
+      if (fo) fo.statusEl.textContent = 'ERR';
+    }
+  }
+  console.error('Upload group error', errs);
+  throw errs;
+}
+// --- END replacement block ---
+
     // complete upload: include price in body; include adminKey header as well
     const complete = await fetch(WORKER_BASE + '/complete-upload', { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': adminKey }, body: JSON.stringify({ size: g.size, barcode: g.barcode, price: g.price || '' })});
     if(!complete.ok){ const t = await complete.text().catch(()=>complete.statusText); throw new Error('Complete-upload failed: ' + t); }
