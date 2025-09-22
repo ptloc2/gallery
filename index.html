@@ -1186,7 +1186,7 @@ async function shareMultipleImages(size, barcodeObj) {
 const headerEl = document.getElementById('pageHeader');
 function handleScroll(){ const y = window.scrollY || window.pageYOffset || document.documentElement.scrollTop; if(y === 0) headerEl.classList.remove('header-hidden'); else headerEl.classList.add('header-hidden'); }
 window.addEventListener('scroll', handleScroll, { passive: true });
-
+/* init */
 /* init */
 async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; handleScroll(); renderAccording();}
 init();
