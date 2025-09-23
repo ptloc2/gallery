@@ -428,8 +428,9 @@ async function exportExcelFromModel() {
     // write each row: column C (index 2) = code, column G (index 6) = price
     for (let i = 0; i < rows.length; i++) {
       const r = startRowZero + i;
-      const code = rows[i][0] || '';
-      const price = rows[i][1] != null ? String(rows[i][1]) : '';
+      const code = rows[i].code || '';
+      const price = rows[i].price || '';
+      const thumbUrl = rows[i].thumbUrl || '';
       ws[XLSX.utils.encode_cell({ c: 0, r })] = { t: 's', v: 'Hàng hoá' }; 
       ws[XLSX.utils.encode_cell({ c: 1, r })] = { t: 's', v: 'A' };
       ws[XLSX.utils.encode_cell({ c: 2, r })] = { t: 's', v: code };
