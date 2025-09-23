@@ -423,6 +423,8 @@ async function exportExcelFromModel() {
       ws[XLSX.utils.encode_cell({ c: 6, r })] = { t: 's', v: price*1000 };
       ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: 0 };
       ws[XLSX.utils.encode_cell({ c: 8, r })] = { t: 's', v: 1 };
+      ws[XLSX.utils.encode_cell({ c: 9, r })] = { t: 's', v: 1 };
+      ws[XLSX.utils.encode_cell({ c: 10, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 11, r })] = { t: 's', v: 1 };
       
     }
