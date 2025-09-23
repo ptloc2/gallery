@@ -420,8 +420,9 @@ async function exportExcelFromModel() {
       ws[XLSX.utils.encode_cell({ c: 1, r })] = { t: 's', v: 'A' };
       ws[XLSX.utils.encode_cell({ c: 2, r })] = { t: 's', v: code };
       ws[XLSX.utils.encode_cell({ c: 4, r })] = { t: 's', v: 'Giày Bóng Rổ' };
-      ws[XLSX.utils.encode_cell({ c: 6, r })] = { t: 's', v: price };
+      ws[XLSX.utils.encode_cell({ c: 6, r })] = { t: 's', v: price*1000 };
       ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '0' };
+      ws[XLSX.utils.encode_cell({ c: 8, r })] = { t: 's', v: '999' };
     }
 
     // update sheet range
