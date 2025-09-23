@@ -396,26 +396,29 @@ async function exportExcelFromModel() {
     // ensure manifest up-to-date (non-force)
     await fetchManifest();
 
-    const rows = flattenManifestToRows(manifest);
-    if (!rows.length) { alert('Không có dữ liệu trong manifest để xuất.'); return; }
+    const rows = [];
+for (const s of (manifest.sizes || [])) {
+  const size = String(s.size || '').trim();
+  for (const b of (s.barcodes || [])) {
+    const code = String(b.code || '').trim();
+    const price = b.price != null ? String(b.price) : '';
+    // chọn thumb filename: ưu tiên file có 'thumb' trong tên, fallback file đầu hoặc 'thumb.jpeg'
+    const thumbName = (Array.isArray(b.images) && b.images.find(n => /thumb/i.test(n)))
+                    || (Array.isArray(b.images) && b.images[0])
+                    || 'thumb.jpeg';
+    const thumbUrl = `${R2_PUBLIC_BASE}/${PREFIX}/${encodeURIComponent(size)}/${encodeURIComponent(code)}/${encodeURIComponent(thumbName)}`;
+    rows.push({ code, price, size, thumbName, thumbUrl });
+  }
+}
 
-    // fetch model.xlsx at same folder level
-    const modelUrl = './model.xlsx';
-    const ab = await fetch(modelUrl).then(r=>{ if(!r.ok) throw new Error('model.xlsx fetch ' + r.status); return r.arrayBuffer(); });
+if (!rows.length) { alert('Không có dữ liệu trong manifest để xuất.'); return; }
 
-    const wb = XLSX.read(ab, { type: 'array' });
-    const firstSheetName = wb.SheetNames[0];
-    const ws = wb.Sheets[firstSheetName];
-
-    // compute start row (zero-based)
-    const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s:{r:0,c:0}, e:{r:0,c:0} };
-    const startRowZero = range.e.r + 1;
-
-    // write each row: column C (index 2) = code, column G (index 6) = price
-    for (let i = 0; i < rows.length; i++) {
-      const r = startRowZero + i;
-      const code = rows[i][0] || '';
-      const price = rows[i][1] != null ? String(rows[i][1]) : '';
+// write rows into sheet: C = code (c:2), G = price (c:6), Q = thumbUrl (c:16)
+for (let i = 0; i < rows.length; i++) {
+  const r = startRowZero + i;
+  const code = rows[i].code || '';
+  const price = rows[i].price || '';
+  const thumbUrl = rows[i].thumbUrl || '';
       ws[XLSX.utils.encode_cell({ c: 0, r })] = { t: 's', v: 'Hàng hoá' }; 
       ws[XLSX.utils.encode_cell({ c: 1, r })] = { t: 's', v: 'A' };
       ws[XLSX.utils.encode_cell({ c: 2, r })] = { t: 's', v: code };
@@ -424,9 +427,9 @@ async function exportExcelFromModel() {
       ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: 0 };
       ws[XLSX.utils.encode_cell({ c: 8, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 9, r })] = { t: 's', v: 1 };
-      ws[XLSX.utils.encode_cell({ c: 10, r })] = { t: 's', v: 1 };
+      ws[XLSX.utils.encode_cell({ c: 10, r })] = { t: 's', v: 10 };
       ws[XLSX.utils.encode_cell({ c: 11, r })] = { t: 's', v: 1 };
-      
+      ws[XLSX.utils.encode_cell({ c: 16, r })] = { t: 's', v: thumbUrl };
     }
 
     // update sheet range
