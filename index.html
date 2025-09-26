@@ -210,6 +210,7 @@ img{ max-width:100%; display:block }
 
 <!-- floating delete -->
 <div id="floatDelete" class="float-delete" aria-hidden="true"><button id="floatDeleteBtn">Xóa</button></div>
+<input id="import-von-input" type="file" accept=".xlsx,.xls" style="display:none" />
 
 <script>
 /* CONFIG */
@@ -1284,6 +1285,5 @@ async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyM
 init();
 
 </script>
-<input id="import-von-input" type="file" accept=".xlsx,.xls" style="display:none" />
 </body>
 </html>
