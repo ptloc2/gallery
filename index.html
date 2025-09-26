@@ -239,6 +239,10 @@ const closeProgressBtn = document.getElementById('closeProgressBtn');
 const floatDelete = document.getElementById('floatDelete');
 const floatDeleteBtn = document.getElementById('floatDeleteBtn');
 
+// global von map cache
+let GLOBAL_VON_MAP = null;
+let GLOBAL_VON_LOADING = null;
+
 let __currentVonAbortController = null;
 let manifestRaw = null;
 let manifest = null;
@@ -247,6 +251,34 @@ let activeTab = 'all';
 let selectedItems = new Set();
 let multiSelectMode = false;
 let priceSortMode = 'asc'; // 'asc' | 'desc' | null
+
+async function loadGlobalVonMap(force = false) {
+  if (!force && GLOBAL_VON_MAP) return GLOBAL_VON_MAP;
+  if (GLOBAL_VON_LOADING) return GLOBAL_VON_LOADING;
+  GLOBAL_VON_LOADING = fetch(`${WORKER_BASE}/von`, { cache: 'no-store' })
+    .then(r => {
+      if (!r.ok) throw new Error('von fetch status ' + r.status);
+      return r.json();
+    })
+    .then(j => {
+      // if endpoint returns {code:..., von:...} (single) treat accordingly
+      if (j && typeof j === 'object' && !Array.isArray(j) && Object.keys(j).length && !('code' in j && 'von' in j)) {
+        GLOBAL_VON_MAP = j;
+      } else {
+        // fallback: maybe worker returned {code, von} for a single code -> build map with that
+        if (j && j.code) { GLOBAL_VON_MAP = GLOBAL_VON_MAP || {}; GLOBAL_VON_MAP[j.code] = j.von; }
+        GLOBAL_VON_MAP = GLOBAL_VON_MAP || {};
+      }
+      GLOBAL_VON_LOADING = null;
+      return GLOBAL_VON_MAP;
+    })
+    .catch(err => {
+      console.warn('loadGlobalVonMap failed', err);
+      GLOBAL_VON_LOADING = null;
+      return GLOBAL_VON_MAP || {};
+    });
+  return GLOBAL_VON_LOADING;
+}
 
 /* session admin key */
 function getAdminKeySession() {return sessionStorage.getItem('admin_key_v1') || null;}
@@ -407,6 +439,7 @@ async function exportExcelFromModel() {
   try {
     // ensure manifest up-to-date (non-force)
     await fetchManifest();
+
     // build rows with size + thumb URL
     const rows = [];
     for (const s of (manifest.sizes || [])) {
@@ -436,29 +469,65 @@ async function exportExcelFromModel() {
     const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s:{r:0,c:0}, e:{r:0,c:0} };
     const startRowZero = range.e.r + 1;
 
-    // write each row: column C (index 2) = code, column G (index 6) = price
+    // --- load whole von map once (preferred) ---
+    let vonMap = {};
+    try {
+      const vres = await fetch(`${WORKER_BASE}/von`, { cache: 'no-store' });
+      if (vres.ok) {
+        const j = await vres.json().catch(()=>null);
+        if (j && typeof j === 'object') vonMap = j;
+      } else {
+        console.warn('von fetch returned', vres.status);
+      }
+    } catch (e) {
+      console.warn('fetch von.json failed', e);
+    }
+
+    // write each row: many columns as your mapping; column C(index2)=code, G(index6)=price*1000, H(index7)=von (number)
     for (let i = 0; i < rows.length; i++) {
       const r = startRowZero + i;
       const code = rows[i].code || '';
-      const price = rows[i].price || '';
-      const thumbUrl = rows[i].thumbUrl || '';
-      ws[XLSX.utils.encode_cell({ c: 0, r })] = { t: 's', v: 'Hàng hoá' }; 
-      ws[XLSX.utils.encode_cell({ c: 1, r })] = { t: 's', v: 'A' };
-      ws[XLSX.utils.encode_cell({ c: 2, r })] = { t: 's', v: code };
-      ws[XLSX.utils.encode_cell({ c: 4, r })] = { t: 's', v: 'Giày Bóng Rổ' };
-      ws[XLSX.utils.encode_cell({ c: 6, r })] = { t: 's', v: price*1000 };
-      ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: 0 };
+      const priceRaw = rows[i].price || '';
+      const priceNum = parseInt(String(priceRaw).replace(/[^\d]/g,'')) || 0;
+      const priceToWrite = priceNum * 1000;
+
+      // von: get from vonMap by exact code key; sanitize to integer (no dots)
+      let vonVal = '';
+      try {
+        const maybe = vonMap && (vonMap.hasOwnProperty(code) ? vonMap[code] : (vonMap[code] === 0 ? 0 : undefined));
+        if (maybe !== undefined && maybe !== null && String(maybe).trim() !== '') {
+          const iv = parseInt(String(maybe).replace(/[^\d]/g,''), 10);
+          if (!Number.isNaN(iv)) vonVal = iv;
+        }
+      } catch (e) {
+        vonVal = '';
+      }
+
+      // fill cells (A,B,C,D,E,G,H,...) per your template
+      ws[XLSX.utils.encode_cell({ c: 0, r })] = { t: 's', v: 'Hàng hoá' }; //col A
+      ws[XLSX.utils.encode_cell({ c: 1, r })] = { t: 's', v: 'A' }; //col B
+      ws[XLSX.utils.encode_cell({ c: 2, r })] = { t: 's', v: code }; //col C
+      ws[XLSX.utils.encode_cell({ c: 4, r })] = { t: 's', v: 'Giày Bóng Rổ' }; //col E
+      // column G = index 6 : price (as number)
+      ws[XLSX.utils.encode_cell({ c: 6, r })] = { t: 'n', v: priceToWrite };
+      // col H index 7 = Vốn (vonVal numeric) or empty
+      if (vonVal !== '') {
+        ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 'n', v: Number(vonVal) };
+      } else {
+        ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '' };
+      }
+      // other fixed columns as in your original
       ws[XLSX.utils.encode_cell({ c: 8, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 9, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 10, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 11, r })] = { t: 's', v: 1 };
-      ws[XLSX.utils.encode_cell({ c: 16, r })] = { t: 's', v: thumbUrl };
-      
+      // thumb url into column Q (index 16) as you used before
+      ws[XLSX.utils.encode_cell({ c: 16, r })] = { t: 's', v: rows[i].thumbUrl || '' };
     }
 
-    // update sheet range
+    // update sheet range (ensure it covers at least column Q / index 16)
     const newER = startRowZero + rows.length - 1;
-    const newEC = Math.max(range.e.c || 6, 6);
+    const newEC = Math.max(range.e.c || 16, 16);
     const newRange = { s: { r: Math.min(range.s.r, 0), c: 0 }, e: { r: Math.max(range.e.r, newER), c: newEC } };
     ws['!ref'] = XLSX.utils.encode_range(newRange);
 
@@ -475,6 +544,7 @@ async function exportExcelFromModel() {
     alert('Xuất Excel lỗi: ' + (err && err.message ? err.message : String(err)));
   }
 }
+
 
 document.getElementById('btn-export-excel').addEventListener('click', exportExcelFromModel);
 
@@ -573,22 +643,23 @@ async function openDetails(size, bc){
   titleEl.textContent = `${size} — ${bc.code}`;
   priceEl.textContent = formatMoney(bc.price);
   
-  // fetch giá vốn (no auth)
-  try {
-    const vonResp = await fetch(`${WORKER_BASE}/von?code=${encodeURIComponent(String(bc.code).trim())}`);
-    if (vonResp && vonResp.ok) {
-      const vonJson = await vonResp.json().catch(()=>null);
-      const vonVal = vonJson && vonJson.von ? vonJson.von : null;
-      const vonSpan = document.getElementById('modalVon');
-      if (vonSpan) vonSpan.textContent = vonVal ? formatMoney(vonVal) : '—';
-    } else {
-      const vonSpan = document.getElementById('modalVon');
-      if (vonSpan) vonSpan.textContent = '—';
+   // show von immediately if cached; otherwise show loading and fetch full map in background
+  const vonSpan = document.getElementById('modalVon');
+  if (vonSpan) {
+    const cached = GLOBAL_VON_MAP && GLOBAL_VON_MAP[bc.code] ? GLOBAL_VON_MAP[bc.code] : null;
+    vonSpan.textContent = cached ? formatMoney(cached) : 'Đang tải...';
+
+    if (!GLOBAL_VON_MAP) {
+      // load full map once, then update modal if still showing same item
+      loadGlobalVonMap().then(map => {
+        const v = map && map[bc.code] ? map[bc.code] : null;
+        // ensure modal still open and is the same item before updating
+        if (!modal.classList.contains('open')) return;
+        if (String(modalTitle.textContent || '').includes(String(bc.code))) {
+          vonSpan.textContent = v ? formatMoney(v) : '—';
+        }
+      }).catch(()=>{ if (modal.classList.contains('open')) vonSpan.textContent = '—'; });
     }
-  } catch (e) {
-    console.warn('fetch von failed', e);
-    const vonSpan = document.getElementById('modalVon');
-    if (vonSpan) vonSpan.textContent = '—';
   }
   
   // ensure edit area hidden & prefilled
