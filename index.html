@@ -1050,7 +1050,7 @@ async function uploadPreparedGroups(preparedGroups, adminKey){
 }
 
 /* render helpers & search */
-function renderAccording(){ updateBodyMultiselectClass(); if(activeTab==='all') renderAll(); else if(activeTab.startsWith('size:')) renderSize(activeTab.split(':')[1]); else if(activeTab==='add') renderAdd(); }
+function renderAccording(){ updateBodyMultiselectClass(); if(activeTab==='all') renderAdd(); else if(activeTab.startsWith('size:')) renderSize(activeTab.split(':')[1]); else if(activeTab==='add') renderAdd(); }
 
 searchInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSearch(); });
 function doSearch(){ const q = (searchInput.value||'').trim().toLowerCase(); if(!q){ alert('Nhập barcode để tìm'); return; } const matches = []; for(const s of manifest.sizes) for(const b of s.barcodes) if(String(b.code).toLowerCase().includes(q)) matches.push({ size: s.size, barcode: b }); if(matches.length===0){ alert('Không tìm thấy'); return; } const first = matches[0]; activeTab = 'size:' + first.size; document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); const tb = Array.from(document.querySelectorAll('.tab')).find(t=>t.textContent.includes(first.size)); if(tb) tb.classList.add('active'); renderAccording(); setTimeout(()=>{ const cards = Array.from(document.querySelectorAll('.card img')); for(const img of cards){ if(img.alt === first.barcode.code){ img.scrollIntoView({behavior:'smooth', block:'center'}); break; } } }, 300); }
