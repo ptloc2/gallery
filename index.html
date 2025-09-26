@@ -951,8 +951,8 @@ function renderAdd(){
 /* helper functions used by add tab (convertImageFileToJpeg, uploadPreparedGroups etc) */
 
 // small helper escapeHtml
-function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\\'':'&#39;'}[c])); }
-
+//function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\\'':'&#39;'}[c])); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 // convert image to jpeg and optionally resize
 async function convertImageFileToJpeg(file, maxWidth=1600, quality=0.80){
   if(!file.type || !file.type.startsWith('image/')) return file;
