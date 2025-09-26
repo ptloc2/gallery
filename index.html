@@ -239,6 +239,7 @@ const closeProgressBtn = document.getElementById('closeProgressBtn');
 const floatDelete = document.getElementById('floatDelete');
 const floatDeleteBtn = document.getElementById('floatDeleteBtn');
 
+let __currentVonAbortController = null;
 let manifestRaw = null;
 let manifest = null;
 let manifestMap = {};
@@ -295,7 +296,59 @@ themeToggle.onclick = ()=>{ const isDark = !document.body.classList.contains('da
 /* helpers */
 function logStatus(msg){ statusEl.textContent = msg; console.log(msg); }
 function showModal(title, htmlOrNode){ modalTitle.textContent = title; if(typeof htmlOrNode === 'string') modalBody.innerHTML = htmlOrNode; else { modalBody.innerHTML=''; modalBody.appendChild(htmlOrNode);} modal.classList.add('open'); modal.setAttribute('aria-hidden','false'); }
-document.getElementById('modalClose').onclick = ()=>{ modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); };
+
+  // --- fetch giá vốn không block UI; hủy request cũ nếu có ---
+  const vonSpan = document.getElementById('modalVon');
+  if (vonSpan) {
+    vonSpan.textContent = 'Đang tải...'; // hiển thị loader text ngay
+    // abort previous
+    try { if (__currentVonAbortController) __currentVonAbortController.abort(); } catch(e){}
+    __currentVonAbortController = new AbortController();
+    const signal = __currentVonAbortController.signal;
+    // create a token so only the latest response will update modal
+    const reqToken = Date.now() + '|' + String(bc.code);
+    modal.dataset.vonReq = reqToken;
+
+    (async () => {
+      try {
+        const code = encodeURIComponent(String(bc.code || '').trim());
+        const res = await fetch(`${WORKER_BASE}/von?code=${code}`, { cache: 'no-store', signal });
+        if (!res.ok) {
+          // if 404 or other, show — (or customized)
+          if (modal.dataset.vonReq !== reqToken) return; // stale
+          vonSpan.textContent = '—';
+          return;
+        }
+        const j = await res.json().catch(()=>null);
+        if (modal.dataset.vonReq !== reqToken) return; // stale (user opened different modal)
+        const v = j && (j.von != null) ? String(j.von).trim() : null;
+        vonSpan.textContent = v ? formatMoney(v) : '—';
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          // aborted: do nothing
+          return;
+        }
+        console.warn('fetch von error', err);
+        if (modal.dataset.vonReq !== reqToken) return;
+        vonSpan.textContent = '—';
+      } finally {
+        // cleanup controller only if it's the same request
+        if (modal.dataset.vonReq === reqToken) {
+          __currentVonAbortController = null;
+          delete modal.dataset.vonReq;
+        }
+      }
+    })();
+  }
+
+
+document.getElementById('modalClose').onclick = ()=>{
+  // abort von fetch if any
+  try { if (__currentVonAbortController) __currentVonAbortController.abort(); } catch(e){/*ignore*/}
+  __currentVonAbortController = null;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden','true');
+};
 modal.onclick = (e)=>{ if(e.target === modal) document.getElementById('modalClose').click(); };
 
 /* manifest normalization: IGNORE keys that are not sizes */
