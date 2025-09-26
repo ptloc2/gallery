@@ -761,7 +761,7 @@ function renderAdd(){
   const addRowBtn = document.createElement('button'); addRowBtn.className='btn tab-like'; addRowBtn.textContent = 'Thêm dòng'; left.appendChild(addRowBtn);
   const uploadAllBtn = document.createElement('button'); uploadAllBtn.className='btn tab-like'; uploadAllBtn.textContent = 'Upload'; left.appendChild(uploadAllBtn);
   const globalAction = document.createElement('select'); const gOpt1 = document.createElement('option'); gOpt1.value='skip'; gOpt1.textContent='Skip if exists (Mặc định)'; const gOpt2 = document.createElement('option'); gOpt2.value='overwrite'; gOpt2.textContent='Overwrite if exists'; const gOpt3 = document.createElement('option'); gOpt3.value='upload'; gOpt3.textContent = 'Always upload'; globalAction.appendChild(gOpt1); globalAction.appendChild(gOpt2); globalAction.appendChild(gOpt3); globalAction.style.marginLeft='10px'; left.appendChild(globalAction);
-
+  
   const right = document.createElement('div'); right.style.display='flex'; right.style.gap='8px'; right.style.alignItems='center';
   controls.appendChild(left); controls.appendChild(right);
   container.appendChild(controls);
@@ -826,17 +826,17 @@ function renderAdd(){
     if(rows.length===0) return alert('Chưa có dòng nào để upload');
 
     const rowInfos = rows.map(r=>{
-      const inputThumb = r.querySelector('td:nth-child(1) input[type="file"]');
-      const inputBarcode = r.querySelector('td:nth-child(2) input[type="text"]');
+      const inputThumb = r.querySelector('td:nth-child(1) input[type=\"file\"]');
+      const inputBarcode = r.querySelector('td:nth-child(2) input[type=\"text\"]');
       const sizeSelect = r.querySelector('td:nth-child(3) select');
-      const newSizeInput = r.querySelector('td:nth-child(3) input[type="text"]');
-      const priceInput = r.querySelector('td:nth-child(4) input[type="text"]');
-      const vonInput = r.querySelector('td:nth-child(5) input[type="text"]');
-      const inputDetails = r.querySelector('td:nth-child(6) input[type="file"][multiple]');
+      const newSizeInput = r.querySelector('td:nth-child(3) input[type=\"text\"]');
+      const priceInput = r.querySelector('td:nth-child(4) input[type=\"text\"]');
+      const vonInput = r.querySelector('td:nth-child(5) input[type=\"text\"]');
+      const inputDetails = r.querySelector('td:nth-child(6) input[type=\"file\"][multiple]');
       const barcode = (inputBarcode && inputBarcode.value || '').trim();
       const sizeVal = sizeSelect ? sizeSelect.value : (newSizeInput ? newSizeInput.value : '');
       const priceVal = priceInput ? (priceInput.value || '').trim() : '';
-      const vonVal = vonInput ? (vonInput.value || '').replace(/[^\d]/g,'').trim() : '';
+      const vonVal = vonInput ? (vonInput.value || '').replace(/[^\\d]/g,'').trim() : '';
       return { tr:r, inputThumb, inputBarcode, barcode, sizeSelect, sizeVal, newSizeInput, inputDetails, priceInput, priceVal, vonInput, vonVal };
     });
 
@@ -853,7 +853,7 @@ function renderAdd(){
     });
     if(duplicates.length > 0){
       const ga = globalAction ? globalAction.value : 'skip';
-      const msg = `Found ${duplicates.length} existing barcode(s) in manifest.\nAction chosen: ${ga}.\n\nTiếp tục? (Hủy để chỉnh lại)`;
+      const msg = `Found ${duplicates.length} existing barcode(s) in manifest.\\nAction chosen: ${ga}.\\n\\nTiếp tục? (Hủy để chỉnh lại)`;
       if(!confirm(msg)) return;
     }
 
@@ -916,20 +916,20 @@ function renderAdd(){
     for(const size of Object.keys(groupsMap)){
       for(const barcode of Object.keys(groupsMap[size])){
         const items = groupsMap[size][barcode];
-        const detailFiles = items.filter(x=>!/^(price\.txt|von\.txt)$/i.test(x.relPath) && !/^thumb/i.test(x.relPath)).map(x=>x.file);
-        const t = items.find(x=>/thumb\./i.test(x.relPath));
+        const detailFiles = items.filter(x=>!/^(price\\.txt|von\\.txt)$/i.test(x.relPath) && !/^thumb/i.test(x.relPath)).map(x=>x.file);
+        const t = items.find(x=>/thumb\\./i.test(x.relPath));
         const thumbFile = t ? t.file : (items[0] && items[0].file);
         // detect price.txt
-        const p = items.find(x=>/^price\.txt$/i.test(x.relPath));
+        const p = items.find(x=>/^price\\.txt$/i.test(x.relPath));
         let detectedPrice = '';
         if(p){
-          try { const txt = await p.file.text(); const num = (txt||'').replace(/[^\d]/g,'').trim(); if(num) detectedPrice = num; } catch(e){ /* ignore */ }
+          try { const txt = await p.file.text(); const num = (txt||'').replace(/[^\\d]/g,'').trim(); if(num) detectedPrice = num; } catch(e){ /* ignore */ }
         }
         // detect von.txt
-        const v = items.find(x=>/^von\.txt$/i.test(x.relPath));
+        const v = items.find(x=>/^von\\.txt$/i.test(x.relPath));
         let detectedVon = '';
         if(v){
-          try { const txt = await v.file.text(); const num = (txt||'').replace(/[^\d]/g,'').trim(); if(num) detectedVon = num; } catch(e){ /* ignore */ }
+          try { const txt = await v.file.text(); const num = (txt||'').replace(/[^\\d]/g,'').trim(); if(num) detectedVon = num; } catch(e){ /* ignore */ }
         }
         const rowObj = addRow({ barcode, size, detailFiles, thumbFile, price: detectedPrice, von: detectedVon });
         rowObj.tr.__prefilledFiles = detailFiles.slice();
@@ -951,7 +951,7 @@ function renderAdd(){
 /* helper functions used by add tab (convertImageFileToJpeg, uploadPreparedGroups etc) */
 
 // small helper escapeHtml
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\\'':'&#39;'}[c])); }
 
 // convert image to jpeg and optionally resize
 async function convertImageFileToJpeg(file, maxWidth=1600, quality=0.80){
@@ -964,14 +964,14 @@ async function convertImageFileToJpeg(file, maxWidth=1600, quality=0.80){
     const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d'); ctx.drawImage(imgBitmap, 0, 0, w, h);
     const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
-    const newName = (file.name.replace(/\.[^/.]+$/, '') || 'image') + '.jpeg';
+    const newName = (file.name.replace(/\\.[^/.]+$/, '') || 'image') + '.jpeg';
     return new File([blob], newName, { type: 'image/jpeg' });
   } catch(e){ console.warn('convertImageFileToJpeg failed', e); return file; }
 }
 
 // upload helpers (pool)
 function uploadFileWithProgress(url, file, onProgress){ return new Promise((resolve, reject) => { const xhr = new XMLHttpRequest(); xhr.open('PUT', url, true); try { xhr.setRequestHeader('Content-Type', file.type); } catch(e){} xhr.upload.onprogress = (ev) => { if (ev.lengthComputable && typeof onProgress === 'function') onProgress(ev.loaded, ev.total); }; xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) resolve({ ok:true, status: xhr.status, response: xhr.responseText }); else reject(new Error('Upload failed: ' + xhr.status + ' ' + xhr.statusText + ' - ' + xhr.responseText)); }; xhr.onerror = () => reject(new Error('Network error during upload')); xhr.send(file); }); }
-async function uploadWithRetry(url, file, onProgress, attempts = 3) { for (let a = 1; a <= attempts; a++) { try { return await uploadFileWithProgress(url, file, onProgress); } catch (err) { if (a === attempts) throw err; await new Promise(r => setTimeout(r, 300 * a)); } } }
+async function uploadWithRetry(url, file, onProgress, attempts = 3) { for (let a = 1; a <= attempts; a++) { try { return await uploadFileWithRetry(url, file, onProgress); } catch (err) { if (a === attempts) throw err; await new Promise(r => setTimeout(r, 300 * a)); } } }
 async function uploadPool(items, concurrency = 4) { let i = 0; const errors = []; const runners = Array.from({length: Math.min(concurrency, items.length)}, async () => { while (true) { const idx = i++; if (idx >= items.length) break; const it = items[idx]; try { await uploadWithRetry(it.url, it.file, it.onProgress); } catch (err) { console.warn('Upload failed for', it.url, err); errors.push({ idx, err }); } } }); await Promise.all(runners); if (errors.length) throw errors; }
 
 // upload prepared groups (presign + upload + complete)
@@ -1060,7 +1060,6 @@ refreshBtn.onclick = async ()=> { try{ const key = await promptAndValidateAdminK
 
 /* initial load */
 (async ()=>{ await fetchManifest(); })();
-
 </script>
 </body>
 </html>
