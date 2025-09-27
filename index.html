@@ -151,6 +151,7 @@ img{ max-width:100%; display:block }
       <div id="more-control" style="position:relative; display:inline-block;">
         <button id="more-btn" class="btn tab-like" title="More">⋯</button>
         <div id="more-panel" aria-hidden="true">
+          <button id="authBtn" class="btn tab-like">Đăng nhập</button>
           <button id="themeToggle" class="btn tab-like">Light/Dark</button>
           <button id="refreshBtn" class="btn tab-like">Refresh</button>
           <button id="btn-export-excel" class="btn tab-like">Xuất Excel</button>
@@ -217,6 +218,89 @@ img{ max-width:100%; display:block }
 const R2_PUBLIC_BASE = "https://pub-9a763a2453ba41939860c4caded896a0.r2.dev";
 const WORKER_BASE = "https://test.lapproak0.workers.dev";
 const PREFIX = "Shoes";
+
+// ---------- AUTH (client) ----------
+const LIMITED_PASSWORD = '1a'; // THAY: mật khẩu "a" (limited). Không an toàn nếu public; dùng cho mục đích bạn yêu cầu.
+const ROLE_SESSION = 'user_role_v1'; // values: 'anon' | 'limited' | 'admin'
+
+function getRole(){ return sessionStorage.getItem(ROLE_SESSION) || 'anon'; }
+function setRole(role){ if(!role || role === 'anon') sessionStorage.removeItem(ROLE_SESSION); else sessionStorage.setItem(ROLE_SESSION, role); }
+
+// validate admin key against worker (returns true if valid)
+async function validateAdminKey(key){
+  try {
+    const r = await fetch(WORKER_BASE + '/refresh-manifest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+      body: JSON.stringify({ now: Date.now() }),
+      cache: 'no-store'
+    });
+    return r.ok;
+  } catch (e) { return false; }
+}
+
+// show login prompt (single entry point)
+async function handleLoginClick(){
+  const current = getRole();
+  if (current !== 'anon') { // currently logged -> logout
+    if (!confirm('Đăng xuất khỏi phiên này?')) return;
+    // clear admin key and role
+    sessionStorage.removeItem('admin_key_v1');
+    setRole('anon');
+    updateAuthUI();
+    return;
+  }
+
+  const input = prompt('Đăng nhập: nhập mật khẩu (a = limited, hoặc admin key để mở full quyền):');
+  if (!input) return;
+  const trimmed = input.trim();
+  if (!trimmed) return;
+
+  // limited password check (client-side)
+  if (trimmed === LIMITED_PASSWORD) {
+    setRole('limited');
+    sessionStorage.removeItem('admin_key_v1'); // ensure admin key not set
+    updateAuthUI();
+    alert('Đăng nhập dạng LIMITED thành công.');
+    return;
+  }
+
+  // otherwise try to validate as admin key against worker
+  const ok = await validateAdminKey(trimmed);
+  if (ok) {
+    sessionStorage.setItem('admin_key_v1', trimmed);
+    setRole('admin');
+    updateAuthUI();
+    alert('Đăng nhập ADMIN thành công.');
+  } else {
+    alert('Mật khẩu/khóa không hợp lệ.');
+  }
+}
+
+// update UI according to role
+function updateAuthUI(){
+  const role = getRole();
+  const authBtn = document.getElementById('authBtn');
+  if (authBtn) authBtn.textContent = (role === 'anon') ? 'Đăng nhập' : 'Đăng xuất';
+
+  // controls visibility:
+  const importBtn = document.getElementById('import-von-btn');
+  if (importBtn) importBtn.style.display = (role === 'admin') ? 'block' : 'none';
+
+  // control whether von is shown in modal and exported
+  window.IS_SHOW_VON = (role === 'admin'); // only admin sees von in modal
+  window.EXPORT_INCLUDE_VON = (role === 'admin'); // only admin exports column H
+
+  // update any immediate UI that depends on role (e.g., hide import panel)
+  const moreControl = document.getElementById('more-control');
+  if (moreControl) {} // placeholder if you wish more dynamic changes
+}
+// attach auth button handler
+const authBtn = document.getElementById('authBtn');
+if (authBtn) authBtn.addEventListener('click', ()=>{ handleLoginClick(); });
+
+// initialize UI on load
+updateAuthUI();
 
 /* DOM */
 const statusEl = document.getElementById('status');
@@ -471,18 +555,20 @@ async function exportExcelFromModel() {
 
     // --- load whole von map once (preferred) ---
     let vonMap = {};
-    try {
-      const vres = await fetch(`${WORKER_BASE}/von`, { cache: 'no-store' });
-      if (vres.ok) {
-        const j = await vres.json().catch(()=>null);
-        if (j && typeof j === 'object') vonMap = j;
-      } else {
-        console.warn('von fetch returned', vres.status);
-      }
-    } catch (e) {
-      console.warn('fetch von.json failed', e);
+const includeVon = (window.EXPORT_INCLUDE_VON === undefined) ? true : !!window.EXPORT_INCLUDE_VON;
+if (includeVon) {
+  try {
+    const vres = await fetch(`${WORKER_BASE}/von`, { cache: 'no-store' });
+    if (vres.ok) {
+      const j = await vres.json().catch(()=>null);
+      if (j && typeof j === 'object') vonMap = j;
+    } else {
+      console.warn('von fetch returned', vres.status);
     }
-
+  } catch (e) {
+    console.warn('fetch von.json failed', e);
+  }
+}
     // write each row: many columns as your mapping; column C(index2)=code, G(index6)=price*1000, H(index7)=von (number)
     for (let i = 0; i < rows.length; i++) {
       const r = startRowZero + i;
@@ -511,11 +597,13 @@ async function exportExcelFromModel() {
       // column G = index 6 : price (as number)
       ws[XLSX.utils.encode_cell({ c: 6, r })] = { t: 'n', v: priceToWrite };
       // col H index 7 = Vốn (vonVal numeric) or empty
-      if (vonVal !== '') {
-        ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 'n', v: Number(vonVal) };
-      } else {
-        ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '' };
-      }
+      if (includeVon) {
+  if (vonVal !== '') ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 'n', v: Number(vonVal) };
+  else ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '' };
+} else {
+  // ensure cell empty (or skip writing)
+  ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '' };
+}
       // other fixed columns as in your original
       ws[XLSX.utils.encode_cell({ c: 8, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 9, r })] = { t: 's', v: 1 };
@@ -643,24 +731,24 @@ async function openDetails(size, bc){
   titleEl.textContent = `${size} — ${bc.code}`;
   priceEl.textContent = formatMoney(bc.price);
   
-   // show von immediately if cached; otherwise show loading and fetch full map in background
-  const vonSpan = document.getElementById('modalVon');
-  if (vonSpan) {
-    const cached = GLOBAL_VON_MAP && GLOBAL_VON_MAP[bc.code] ? GLOBAL_VON_MAP[bc.code] : null;
+  // in openDetails after priceEl.textContent = ...
+const vonSpan = document.getElementById('modalVon');
+if (vonSpan) {
+  if (!window.IS_SHOW_VON) {
+    vonSpan.textContent = '—'; // hidden for limited/anon
+  } else {
+    // existing logic: use cached GLOBAL_VON_MAP if any, otherwise fetch
+    const cached = (typeof GLOBAL_VON_MAP !== 'undefined' && GLOBAL_VON_MAP && GLOBAL_VON_MAP[bc.code]) ? GLOBAL_VON_MAP[bc.code] : null;
     vonSpan.textContent = cached ? formatMoney(cached) : 'Đang tải...';
-
-    if (!GLOBAL_VON_MAP) {
-      // load full map once, then update modal if still showing same item
-      loadGlobalVonMap().then(map => {
-        const v = map && map[bc.code] ? map[bc.code] : null;
-        // ensure modal still open and is the same item before updating
-        if (!modal.classList.contains('open')) return;
-        if (String(modalTitle.textContent || '').includes(String(bc.code))) {
-          vonSpan.textContent = v ? formatMoney(v) : '—';
-        }
-      }).catch(()=>{ if (modal.classList.contains('open')) vonSpan.textContent = '—'; });
-    }
+    if (!GLOBAL_VON_MAP) loadGlobalVonMap().then(map => {
+      const v = map && map[bc.code] ? map[bc.code] : null;
+      if (!modal.classList.contains('open')) return;
+      if (String(modalTitle.textContent || '').includes(String(bc.code))) {
+        vonSpan.textContent = v ? formatMoney(v) : '—';
+      }
+    }).catch(()=>{ if (modal.classList.contains('open')) vonSpan.textContent = '—'; });
   }
+}
   
   // ensure edit area hidden & prefilled
   priceEditRow.style.display = 'none';
