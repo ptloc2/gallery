@@ -601,9 +601,9 @@ async function exportExcelFromModel() {
 
       // fill cells (A,B,C,D,E,G,H,...) per your template
       ws[XLSX.utils.encode_cell({ c: 0, r })] = { t: 's', v: 'Hàng hoá' }; //col A
-      ws[XLSX.utils.encode_cell({ c: 1, r })] = { t: 's', v: 'A' }; //col B
+      ws[XLSX.utils.encode_cell({ c: 1, r })] = { t: 's', v: 'Giày Bóng Rổ' }; //col B
       ws[XLSX.utils.encode_cell({ c: 2, r })] = { t: 's', v: code }; //col C
-      ws[XLSX.utils.encode_cell({ c: 4, r })] = { t: 's', v: 'Giày Bóng Rổ' }; //col E
+      ws[XLSX.utils.encode_cell({ c: 4, r })] = { t: 's', v: 'Giày Bóng Rổ' + code }; //col E
       // column G = index 6 : price (as number)
       ws[XLSX.utils.encode_cell({ c: 6, r })] = { t: 'n', v: priceToWrite };
       // col H index 7 = Vốn (vonVal numeric) or empty
@@ -613,7 +613,7 @@ async function exportExcelFromModel() {
         ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '0' };
       }
       // other fixed columns as in your original
-      ws[XLSX.utils.encode_cell({ c: 8, r })] = { t: 's', v: 1 };
+      ws[XLSX.utils.encode_cell({ c: 8, r })] = { t: 's', v: 1 }; //ton kho
       ws[XLSX.utils.encode_cell({ c: 9, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 10, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 11, r })] = { t: 's', v: 1 };
