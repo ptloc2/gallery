@@ -219,89 +219,6 @@ const R2_PUBLIC_BASE = "https://pub-9a763a2453ba41939860c4caded896a0.r2.dev";
 const WORKER_BASE = "https://test.lapproak0.workers.dev";
 const PREFIX = "Shoes";
 
-// ---------- AUTH (client) ----------
-const LIMITED_PASSWORD = '1a'; // THAY: mật khẩu "a" (limited). Không an toàn nếu public; dùng cho mục đích bạn yêu cầu.
-const ROLE_SESSION = 'user_role_v1'; // values: 'anon' | 'limited' | 'admin'
-
-function getRole(){ return sessionStorage.getItem(ROLE_SESSION) || 'anon'; }
-function setRole(role){ if(!role || role === 'anon') sessionStorage.removeItem(ROLE_SESSION); else sessionStorage.setItem(ROLE_SESSION, role); }
-
-// validate admin key against worker (returns true if valid)
-async function validateAdminKey(key){
-  try {
-    const r = await fetch(WORKER_BASE + '/refresh-manifest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
-      body: JSON.stringify({ now: Date.now() }),
-      cache: 'no-store'
-    });
-    return r.ok;
-  } catch (e) { return false; }
-}
-
-// show login prompt (single entry point)
-async function handleLoginClick(){
-  const current = getRole();
-  if (current !== 'anon') { // currently logged -> logout
-    if (!confirm('Đăng xuất khỏi phiên này?')) return;
-    // clear admin key and role
-    sessionStorage.removeItem('admin_key_v1');
-    setRole('anon');
-    updateAuthUI();
-    return;
-  }
-
-  const input = prompt('Đăng nhập: nhập mật khẩu (a = limited, hoặc admin key để mở full quyền):');
-  if (!input) return;
-  const trimmed = input.trim();
-  if (!trimmed) return;
-
-  // limited password check (client-side)
-  if (trimmed === LIMITED_PASSWORD) {
-    setRole('limited');
-    sessionStorage.removeItem('admin_key_v1'); // ensure admin key not set
-    updateAuthUI();
-    alert('Đăng nhập dạng LIMITED thành công.');
-    return;
-  }
-
-  // otherwise try to validate as admin key against worker
-  const ok = await validateAdminKey(trimmed);
-  if (ok) {
-    sessionStorage.setItem('admin_key_v1', trimmed);
-    setRole('admin');
-    updateAuthUI();
-    alert('Đăng nhập ADMIN thành công.');
-  } else {
-    alert('Mật khẩu/khóa không hợp lệ.');
-  }
-}
-
-// update UI according to role
-function updateAuthUI(){
-  const role = getRole();
-  const authBtn = document.getElementById('authBtn');
-  if (authBtn) authBtn.textContent = (role === 'anon') ? 'Đăng nhập' : 'Đăng xuất';
-
-  // controls visibility:
-  const importBtn = document.getElementById('import-von-btn');
-  if (importBtn) importBtn.style.display = (role === 'admin') ? 'block' : 'none';
-
-  // control whether von is shown in modal and exported
-  window.IS_SHOW_VON = (role === 'admin'); // only admin sees von in modal
-  window.EXPORT_INCLUDE_VON = (role === 'admin'); // only admin exports column H
-
-  // update any immediate UI that depends on role (e.g., hide import panel)
-  const moreControl = document.getElementById('more-control');
-  if (moreControl) {} // placeholder if you wish more dynamic changes
-}
-// attach auth button handler
-const authBtn = document.getElementById('authBtn');
-if (authBtn) authBtn.addEventListener('click', ()=>{ handleLoginClick(); });
-
-// initialize UI on load
-updateAuthUI();
-
 /* DOM */
 const statusEl = document.getElementById('status');
 const tabsEl = document.getElementById('tabs');
@@ -402,6 +319,101 @@ async function promptAndValidateAdminKey(){
       continue;
     }
   }
+}
+
+/* role helpers stored in session */
+function getRole(){ return sessionStorage.getItem('user_role_v1') || 'anon'; } // 'anon'|'limited'|'admin'
+function setRole(r){ if(!r || r==='anon') sessionStorage.removeItem('user_role_v1'); else sessionStorage.setItem('user_role_v1', r); }
+
+/* update UI visibility based on role */
+function updateRoleVisibility(){
+  const role = getRole();
+  const authBtn = document.getElementById('authBtn');
+  if(authBtn) authBtn.textContent = (role === 'anon') ? 'Đăng nhập' : 'Đăng xuất';
+  // show/hide Refresh: only show after any login
+  const refreshBtn = document.getElementById('refreshBtn');
+  if(refreshBtn) refreshBtn.style.display = (role === 'anon') ? 'none' : 'inline-block';
+  // Export visible only for admin
+  const exportBtn = document.getElementById('btn-export-excel');
+  if(exportBtn) exportBtn.style.display = (role === 'admin') ? 'inline-block' : 'none';
+  // Import (if exists) visible only for admin
+  const importBtn = document.getElementById('import-von-btn');
+  if(importBtn) importBtn.style.display = (role === 'admin') ? 'inline-block' : 'none';
+}
+
+
+/* handle login/logout flow:
+ - nếu đang anon: prompt: gõ "yes" => sẽ yêu cầu admin key (khi key hợp lệ => role=admin)
+ - hoặc dán admin key trực tiếp => nếu hợp lệ => lưu key & role=limited
+ - nếu đang logged thì nút trở thành Đăng xuất
+*/
+async function handleLoginClick(){
+  const current = getRole();
+  if(current !== 'anon'){
+    if(!confirm('Đăng xuất?')) return;
+    // sign out
+    setRole('anon');
+    setAdminKeySession(null);
+    updateRoleVisibility();
+    alert('Đã đăng xuất.');
+    return;
+  }
+
+  while(true){
+    const raw = prompt('Đăng nhập:\n- Gõ "yes" rồi Enter để vào ADMIN (sẽ yêu cầu admin key)\n- Hoặc dán Admin Key trực tiếp (nếu hợp lệ sẽ vào LIMITED)\n(Chọn Cancel để huỷ)');
+    if(raw === null) return;
+    const input = String(raw || '').trim();
+    if(!input){ alert('Giá trị rỗng. Nhập lại.'); continue; }
+
+    if(input.toLowerCase() === 'yes'){
+      // admin path: prompt admin key using existing validator
+      const key = await promptAndValidateAdminKey();
+      if(!key){ alert('Admin key không hợp lệ hoặc huỷ.'); continue; }
+      setRole('admin');
+      updateRoleVisibility();
+      alert('Đăng nhập: ADMIN');
+      return;
+    }
+
+    // treat input as admin-key candidate: validate by calling refresh-manifest
+    try{
+      const res = await fetch(WORKER_BASE + '/refresh-manifest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': input },
+        body: JSON.stringify({ now: Date.now() }),
+        cache: 'no-store'
+      });
+      if(res.ok){
+        // save key (so further actions that need it can use it), but role=limited (UI restricted)
+        setAdminKeySession(input);
+        setRole('limited');
+        updateRoleVisibility();
+        alert('Đăng nhập: LIMITED (admin key hợp lệ đã được lưu).');
+        return;
+      } else {
+        alert('Admin Key không hợp lệ. Nếu muốn vào ADMIN, gõ "yes" rồi Enter.');
+        continue;
+      }
+    } catch(e){
+      console.warn('validate key error', e);
+      alert('Lỗi mạng khi kiểm tra key. Thử lại.');
+      continue;
+    }
+  }
+}
+
+/* ensureAuthForAction:
+ - if anon => call handleLoginClick() (so UI updates via login button flow)
+ - returns { ok:true/false, key: string|null }
+*/
+async function ensureAuthForAction(){
+  const role = getRole();
+  if(role === 'anon'){
+    await handleLoginClick();
+  }
+  const newRole = getRole();
+  if(newRole === 'anon') return { ok:false, key:null };
+  return { ok:true, key: getAdminKeySession() || null };
 }
 
 /* theme */
@@ -555,20 +567,18 @@ async function exportExcelFromModel() {
 
     // --- load whole von map once (preferred) ---
     let vonMap = {};
-const includeVon = (window.EXPORT_INCLUDE_VON === undefined) ? true : !!window.EXPORT_INCLUDE_VON;
-if (includeVon) {
-  try {
-    const vres = await fetch(`${WORKER_BASE}/von`, { cache: 'no-store' });
-    if (vres.ok) {
-      const j = await vres.json().catch(()=>null);
-      if (j && typeof j === 'object') vonMap = j;
-    } else {
-      console.warn('von fetch returned', vres.status);
+    try {
+      const vres = await fetch(`${WORKER_BASE}/von`, { cache: 'no-store' });
+      if (vres.ok) {
+        const j = await vres.json().catch(()=>null);
+        if (j && typeof j === 'object') vonMap = j;
+      } else {
+        console.warn('von fetch returned', vres.status);
+      }
+    } catch (e) {
+      console.warn('fetch von.json failed', e);
     }
-  } catch (e) {
-    console.warn('fetch von.json failed', e);
-  }
-}
+
     // write each row: many columns as your mapping; column C(index2)=code, G(index6)=price*1000, H(index7)=von (number)
     for (let i = 0; i < rows.length; i++) {
       const r = startRowZero + i;
@@ -597,13 +607,11 @@ if (includeVon) {
       // column G = index 6 : price (as number)
       ws[XLSX.utils.encode_cell({ c: 6, r })] = { t: 'n', v: priceToWrite };
       // col H index 7 = Vốn (vonVal numeric) or empty
-      if (includeVon) {
-  if (vonVal !== '') ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 'n', v: Number(vonVal) };
-  else ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '' };
-} else {
-  // ensure cell empty (or skip writing)
-  ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '' };
-}
+      if (vonVal !== '') {
+        ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 'n', v: Number(vonVal) };
+      } else {
+        ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '' };
+      }
       // other fixed columns as in your original
       ws[XLSX.utils.encode_cell({ c: 8, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 9, r })] = { t: 's', v: 1 };
@@ -633,7 +641,7 @@ if (includeVon) {
   }
 }
 
-
+document.getElementById('authBtn').addEventListener('click', ()=>{ handleLoginClick(); });
 document.getElementById('btn-export-excel').addEventListener('click', exportExcelFromModel);
 
 /* ---------------------------------------------------------------- */
@@ -731,22 +739,23 @@ async function openDetails(size, bc){
   titleEl.textContent = `${size} — ${bc.code}`;
   priceEl.textContent = formatMoney(bc.price);
   
-  // in openDetails after priceEl.textContent = ...
+   // show von immediately if cached; otherwise show loading and fetch full map in background
+  // at top of openDetails after setting title/price:
+// at top of openDetails after setting title/price:
 const vonSpan = document.getElementById('modalVon');
-if (vonSpan) {
-  if (!window.IS_SHOW_VON) {
-    vonSpan.textContent = '—'; // hidden for limited/anon
+if(vonSpan){
+  if(getRole() === 'admin'){
+    vonSpan.textContent = 'Đang tải...';
+    // fetch von (you already had fetch logic — keep it, or reuse loadGlobalVonMap)
+    fetch(WORKER_BASE + '/von?code=' + encodeURIComponent(String(bc.code).trim()), { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { vonSpan.textContent = (j && j.von) ? formatMoney(j.von) : '—'; })
+      .catch(e => { console.warn(e); vonSpan.textContent = '—'; });
+    // ensure visible
+    vonSpan.parentElement.style.display = 'block';
   } else {
-    // existing logic: use cached GLOBAL_VON_MAP if any, otherwise fetch
-    const cached = (typeof GLOBAL_VON_MAP !== 'undefined' && GLOBAL_VON_MAP && GLOBAL_VON_MAP[bc.code]) ? GLOBAL_VON_MAP[bc.code] : null;
-    vonSpan.textContent = cached ? formatMoney(cached) : 'Đang tải...';
-    if (!GLOBAL_VON_MAP) loadGlobalVonMap().then(map => {
-      const v = map && map[bc.code] ? map[bc.code] : null;
-      if (!modal.classList.contains('open')) return;
-      if (String(modalTitle.textContent || '').includes(String(bc.code))) {
-        vonSpan.textContent = v ? formatMoney(v) : '—';
-      }
-    }).catch(()=>{ if (modal.classList.contains('open')) vonSpan.textContent = '—'; });
+    // hide the whole row when not admin
+    if(vonSpan.parentElement) vonSpan.parentElement.style.display = 'none';
   }
 }
   
@@ -910,7 +919,8 @@ function markGroupDone(groupEl, ok=true, msg='OK'){ groupEl.barFill.style.width 
 /* DELETE with progress: call permanent-delete per item and refresh manifest (force) after delete */
 async function performBulkDelete(){
   if(selectedItems.size === 0) return alert('Chưa chọn mục để xóa');
-  const key = await promptAndValidateAdminKey(); if(!key) return; 
+  const auth = await ensureAuthForAction(); if(!auth.ok) return;
+  const key = auth.key; // may be null if limited but then some worker endpoints may require key — depends on your worker 
   if(!confirm('Xác nhận xóa đã chọn?')) return;
 
   const items = Array.from(selectedItems).map(s=>{ const [size, barcode] = s.split('|'); return { size, barcode }; });
@@ -1073,55 +1083,12 @@ function renderAdd(){
     tr.__fields = { inputThumb, inputBarcode, sizeSelect, newSizeInput, priceInput, inputDetails, detailsPreviewWrap };
     return { tr, inputThumb, thumbPreview, inputBarcode, sizeSelect, newSizeInput, inputDetails, detailsPreviewWrap, priceInput };
   }
-
-   // --- fetch giá vốn không block UI; hủy request cũ nếu có ---
-  const vonSpan = document.getElementById('modalVon');
-  if (vonSpan) {
-    vonSpan.textContent = 'Đang tải...'; // hiển thị loader text ngay
-    // abort previous
-    try { if (__currentVonAbortController) __currentVonAbortController.abort(); } catch(e){}
-    __currentVonAbortController = new AbortController();
-    const signal = __currentVonAbortController.signal;
-    // create a token so only the latest response will update modal
-    const reqToken = Date.now() + '|' + String(bc.code);
-    modal.dataset.vonReq = reqToken;
-
-    (async () => {
-      try {
-        const code = encodeURIComponent(String(bc.code || '').trim());
-        const res = await fetch(`${WORKER_BASE}/von?code=${code}`, { cache: 'no-store', signal });
-        if (!res.ok) {
-          // if 404 or other, show — (or customized)
-          if (modal.dataset.vonReq !== reqToken) return; // stale
-          vonSpan.textContent = '—';
-          return;
-        }
-        const j = await res.json().catch(()=>null);
-        if (modal.dataset.vonReq !== reqToken) return; // stale (user opened different modal)
-        const v = j && (j.von != null) ? String(j.von).trim() : null;
-        vonSpan.textContent = v ? formatMoney(v) : '—';
-      } catch (err) {
-        if (err && err.name === 'AbortError') {
-          // aborted: do nothing
-          return;
-        }
-        console.warn('fetch von error', err);
-        if (modal.dataset.vonReq !== reqToken) return;
-        vonSpan.textContent = '—';
-      } finally {
-        // cleanup controller only if it's the same request
-        if (modal.dataset.vonReq === reqToken) {
-          __currentVonAbortController = null;
-          delete modal.dataset.vonReq;
-        }
-      }
-    })();
-  }
   
   addRowBtn.onclick = ()=> addRow();
 
   uploadAllBtn.onclick = async ()=>{
-    const key = await promptAndValidateAdminKey(); if(!key) return; 
+    const auth = await ensureAuthForAction(); if(!auth.ok) return;
+	const key = auth.key; 
     const rows = Array.from(tbody.querySelectorAll('tr'));
     if(rows.length===0) return alert('Chưa có dòng nào để upload');
 
@@ -1494,7 +1461,8 @@ window.addEventListener('scroll', handleScroll, { passive: true });
 /* init */
 async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; handleScroll(); renderAccording();}
 init();
-
+updateRoleVisibility();
+document.addEventListener('DOMContentLoaded', ()=>{ updateRoleVisibility(); });
 </script>
 </body>
 </html>
