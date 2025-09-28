@@ -358,7 +358,7 @@ async function handleLoginClick(){
     alert('Đã đăng xuất.');
     return;
   }
-
+ 
   while(true){
     const raw = prompt('Đăng nhập:\n- Gõ "yes" rồi Enter để vào ADMIN (sẽ yêu cầu admin key)\n- Hoặc dán Admin Key trực tiếp (nếu hợp lệ sẽ vào LIMITED)\n(Chọn Cancel để huỷ)');
     if(raw === null) return;
@@ -610,7 +610,7 @@ async function exportExcelFromModel() {
       if (vonVal !== '') {
         ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 'n', v: Number(vonVal) };
       } else {
-        ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '' };
+        ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 's', v: '0' };
       }
       // other fixed columns as in your original
       ws[XLSX.utils.encode_cell({ c: 8, r })] = { t: 's', v: 1 };
