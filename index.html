@@ -287,7 +287,7 @@ function setAdminKeySession(key) {if (!key) sessionStorage.removeItem('admin_key
 async function promptAndValidateAdminKey(){
   const existing = getAdminKeySession(); if (existing) return existing;
   while (true) {
-    const input = prompt('Nhập mật khẩu.');
+    const input = prompt('Nhập mật khẩu:');
     if (!input) return null; // user canceled or empty
     const trimmed = input.trim();
     if (!trimmed) { alert('Mật khẩu rỗng. Nhập lại?'); continue; }
@@ -342,11 +342,7 @@ function updateRoleVisibility(){
 }
 
 
-/* handle login/logout flow:
- - nếu đang anon: prompt: gõ "yes" => sẽ yêu cầu admin key (khi key hợp lệ => role=admin)
- - hoặc dán admin key trực tiếp => nếu hợp lệ => lưu key & role=limited
- - nếu đang logged thì nút trở thành Đăng xuất
-*/
+/* handle login/logout flow:*/
 async function handleLoginClick(){
   const current = getRole();
   if(current !== 'anon'){
@@ -355,23 +351,21 @@ async function handleLoginClick(){
     setRole('anon');
     setAdminKeySession(null);
     updateRoleVisibility();
-    alert('Đã đăng xuất.');
     return;
   }
  
   while(true){
-    const raw = prompt('Đăng nhập:\n- Gõ "yes" rồi Enter để vào ADMIN (sẽ yêu cầu admin key)\n- Hoặc dán Admin Key trực tiếp (nếu hợp lệ sẽ vào LIMITED)\n(Chọn Cancel để huỷ)');
+    const raw = prompt('Nhập mật khẩu:');
     if(raw === null) return;
     const input = String(raw || '').trim();
-    if(!input){ alert('Giá trị rỗng. Nhập lại.'); continue; }
+    if(!input){ alert('Mật khẩu rỗng. Nhập lại?'); continue; }
 
     if(input.toLowerCase() === 'yes'){
       // admin path: prompt admin key using existing validator
       const key = await promptAndValidateAdminKey();
-      if(!key){ alert('Admin key không hợp lệ hoặc huỷ.'); continue; }
+      if(!key){ alert('Mật khẩu không hợp lệ hoặc huỷ.'); continue; }
       setRole('admin');
       updateRoleVisibility();
-      alert('Đăng nhập: ADMIN');
       return;
     }
 
@@ -388,10 +382,9 @@ async function handleLoginClick(){
         setAdminKeySession(input);
         setRole('limited');
         updateRoleVisibility();
-        alert('Đăng nhập: LIMITED (admin key hợp lệ đã được lưu).');
         return;
       } else {
-        alert('Admin Key không hợp lệ. Nếu muốn vào ADMIN, gõ "yes" rồi Enter.');
+        alert('mật khẩu không hợp lệ.');
         continue;
       }
     } catch(e){
