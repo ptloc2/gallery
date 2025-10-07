@@ -286,41 +286,34 @@ function getAdminKeySession() {return sessionStorage.getItem('admin_key_v1') || 
 function setAdminKeySession(key) {if (!key) sessionStorage.removeItem('admin_key_v1');else sessionStorage.setItem('admin_key_v1', key);} 
 // Thay thế promptAndValidateAdminKey() bằng hàm này
 async function promptAndValidateAdminKey(){
-  const existing = getAdminKeySession();
-  if (existing) return existing;
+  const existing = getAdminKeySession(); if (existing) return existing;
   while (true) {
     const input = prompt('Nhập mật khẩu:');
-    if (input === null) return null; // user canceled
-    const trimmed = String(input || '').trim();
+    if (!input) return null;
+    const trimmed = input.trim();
     if (!trimmed) { alert('Mật khẩu rỗng. Nhập lại?'); continue; }
-
     try {
-      // Gọi endpoint nhẹ để validate key (worker phải có /validate-key)
       const res = await fetch(WORKER_BASE + '/validate-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': trimmed },
-        body: JSON.stringify({ now: Date.now() }),
-        cache: 'no-store'
+        cache: 'no-store',
+        body: JSON.stringify({ now: Date.now() })
       });
-
       if (res.status === 200) {
-        // lưu key tạm (session) — tránh validate lại trong phiên
         setAdminKeySession(trimmed);
-        // KHÔNG await fetchManifest() để khỏi block UI; gọi async nếu muốn làm mới manifest
-        // fetchManifest().catch(()=>{}); // <-- uncomment nếu muốn refresh in background
+        // optional: refresh manifest in background without blocking UI
+        fetchManifest().catch(()=>{});
         return trimmed;
       } else if (res.status === 401) {
         alert('Admin key không hợp lệ (401). Vui lòng thử lại.');
         continue;
       } else {
-        let txt = '';
-        try { txt = await res.text(); } catch(e){/*ignore*/}
+        const txt = await res.text().catch(()=> '');
         alert('Lỗi khi kiểm tra key. Status: ' + res.status + (txt ? (' — ' + txt) : ''));
         continue;
       }
     } catch (err) {
       console.warn('Error validating admin key:', err);
-      // mạng/timeout: cho user retry hoặc hủy
       if (!confirm('Lỗi mạng khi kiểm tra admin key. Thử lại?')) return null;
       continue;
     }
