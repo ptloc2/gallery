@@ -800,7 +800,7 @@ if(vonSpan){
     }
 
     // 2) Sau khi cập nhật entry đơn, gọi refresh-manifest để rebuild toàn bộ manifest (nên làm)
-    try {
+    /*try {
       const r2 = await fetch(WORKER_BASE + '/refresh-manifest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': adminKey },
@@ -815,7 +815,7 @@ if(vonSpan){
       }
     } catch (e) {
       console.warn('refresh-manifest error', e);
-    }
+    }*/
 
     // 3) reload client manifest để UI cập nhật
     try { await fetchManifest(); } catch(e){ console.warn('fetchManifest failed after save', e); }
@@ -1086,11 +1086,11 @@ async function performBulkDelete(){
   }
 
   // rebuild manifest on worker (requires admin key)
-  try{
-    const r = await fetch(WORKER_BASE + '/refresh-manifest', { method: 'POST', headers: { 'x-api-key': key } });
-    if(!r.ok) console.warn('refresh-manifest returned', r.status);
-  } catch(e){ console.warn('refresh-manifest error', e); }
-
+  /*try{
+  const r = await fetch(WORKER_BASE + '/refresh-manifest', { method: 'POST', headers: { 'x-api-key': key } });
+  if(!r.ok) console.warn('refresh-manifest returned', r.status);
+} catch(e){ console.warn('refresh-manifest error', e); }
+*/
   // fetch fresh manifest (non-force)
   try { await fetchManifest(); } catch(e){ console.warn('fetchManifest after delete failed', e); }
 
