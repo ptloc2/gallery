@@ -367,33 +367,35 @@ async function handleLoginClick(){
       updateRoleVisibility();
       return;
     }
-
-    // treat input as admin-key candidate: validate by calling refresh-manifest
-    try{
-      const res = await fetch(WORKER_BASE + '/refresh-manifest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': input },
-        body: JSON.stringify({ now: Date.now() }),
-        cache: 'no-store'
-      });
-      if(res.ok){
-        // save key (so further actions that need it can use it), but role=limited (UI restricted)
-        setAdminKeySession(input);
-        setRole('limited');
-        updateRoleVisibility();
-        return;
-      } else {
-        alert('mật khẩu không hợp lệ.');
-        continue;
-      }
-    } catch(e){
-      console.warn('validate key error', e);
-      alert('Lỗi mạng khi kiểm tra key. Thử lại.');
-      continue;
-    }
+    // treat input as admin-key candidate: validate by calling validate-key (lightweight)
+try{
+  const res = await fetch(WORKER_BASE + '/validate-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': input },
+    body: JSON.stringify({ now: Date.now() }),
+    cache: 'no-store'
+  });
+  if (res.status === 200) {
+    // key hợp lệ (lightweight check) -> limited
+    setAdminKeySession(input);
+    setRole('limited');
+    updateRoleVisibility();
+    return;
+  } else if (res.status === 401) {
+    alert('Mật khẩu không hợp lệ.');
+    continue;
+  } else {
+    const txt = await res.text().catch(()=> '');
+    alert('Lỗi khi kiểm tra key. Status: ' + res.status + (txt ? (' — ' + txt) : ''));
+    continue;
+  }
+} catch (e) {
+  console.warn('validate key error', e);
+  alert('Lỗi mạng khi kiểm tra key. Thử lại.');
+  continue;
+}
   }
 }
-
 /* ensureAuthForAction:
  - if anon => call handleLoginClick() (so UI updates via login button flow)
  - returns { ok:true/false, key: string|null }
