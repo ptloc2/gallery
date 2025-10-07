@@ -284,38 +284,44 @@ async function loadGlobalVonMap(force = false) {
 /* session admin key */
 function getAdminKeySession() {return sessionStorage.getItem('admin_key_v1') || null;}
 function setAdminKeySession(key) {if (!key) sessionStorage.removeItem('admin_key_v1');else sessionStorage.setItem('admin_key_v1', key);} 
+// Thay thế promptAndValidateAdminKey() bằng hàm này
 async function promptAndValidateAdminKey(){
-  const existing = getAdminKeySession(); if (existing) return existing;
+  const existing = getAdminKeySession();
+  if (existing) return existing;
   while (true) {
     const input = prompt('Nhập mật khẩu:');
-    if (!input) return null; // user canceled or empty
-    const trimmed = input.trim();
+    if (input === null) return null; // user canceled
+    const trimmed = String(input || '').trim();
     if (!trimmed) { alert('Mật khẩu rỗng. Nhập lại?'); continue; }
+
     try {
-      const url = WORKER_BASE + '/refresh-manifest';
-      const res = await fetch(url, {
+      // Gọi endpoint nhẹ để validate key (worker phải có /validate-key)
+      const res = await fetch(WORKER_BASE + '/validate-key', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json','x-api-key': trimmed},
-        cache: 'no-store',
-        body: JSON.stringify({ now: Date.now() })
+        headers: { 'Content-Type': 'application/json', 'x-api-key': trimmed },
+        body: JSON.stringify({ now: Date.now() }),
+        cache: 'no-store'
       });
+
       if (res.status === 200) {
+        // lưu key tạm (session) — tránh validate lại trong phiên
         setAdminKeySession(trimmed);
-        try { await fetchManifest(); } catch (e) { /* ignore fetchManifest error */ }
+        // KHÔNG await fetchManifest() để khỏi block UI; gọi async nếu muốn làm mới manifest
+        // fetchManifest().catch(()=>{}); // <-- uncomment nếu muốn refresh in background
         return trimmed;
       } else if (res.status === 401) {
         alert('Admin key không hợp lệ (401). Vui lòng thử lại.');
-        continue; // prompt again
+        continue;
       } else {
-        // other non-200 statuses
         let txt = '';
-        try { txt = await res.text(); } catch(e){ /* ignore */ }
+        try { txt = await res.text(); } catch(e){/*ignore*/}
         alert('Lỗi khi kiểm tra key. Status: ' + res.status + (txt ? (' — ' + txt) : ''));
         continue;
       }
     } catch (err) {
       console.warn('Error validating admin key:', err);
-      alert('Lỗi mạng khi kiểm tra admin key. Thử lại?');
+      // mạng/timeout: cho user retry hoặc hủy
+      if (!confirm('Lỗi mạng khi kiểm tra admin key. Thử lại?')) return null;
       continue;
     }
   }
@@ -697,7 +703,7 @@ function makeCard(size, bc, withCheckbox=false){
   <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M16 4h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2"/>
   <rect x="8" y="2" width="8" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/>
 </svg>
-    <span style="font-weight:700">${bc.code}</span>
+    <span style="font-weight:700">Lưu / Share</span>
   `;
   shareBtn.onclick = ()=> shareMultipleImages(size, bc);
   row.appendChild(shareBtn);
@@ -712,7 +718,7 @@ function formatMoney(val){
   if(val === null || val === undefined || val === '') return '—';
   const s = String(val).replace(/[^\d]/g,'');
   if(!s) return '—';
-  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ".") + 'k đ';
+  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ".") + 'k';
 }
 function unformatMoney(s){
   return String(s||'').replace(/[^\d]/g,'').trim();
@@ -861,32 +867,170 @@ function renderActionsBar(){
   const left = document.createElement('div');
 
   if(activeTab !== 'add'){
-    const toggleBtn = document.createElement('button'); toggleBtn.className='btn tab-like';
-    toggleBtn.textContent = multiSelectMode ? 'Hủy' : 'Chọn xóa';
-    toggleBtn.onclick = ()=>{ multiSelectMode = !multiSelectMode; if(!multiSelectMode) selectedItems.clear(); updateBodyMultiselectClass(); floatDelete.style.display = multiSelectMode ? 'block' : 'none'; renderAccording(); };
+    // toggle + "Chọn theo excel" + sort control (REPLACE phần cũ)
+const toggleBtn = document.createElement('button');
+toggleBtn.className = 'btn tab-like';
+toggleBtn.textContent = multiSelectMode ? 'Hủy' : 'Chọn xóa';
 
-    left.appendChild(toggleBtn);
+// helper đảm bảo class body cho multiselect
+function updateBodyMultiselectClass(){
+  document.body.classList.toggle('body-multiselect', !!multiSelectMode);
+}
 
-    // sort by price inline control
-    // sort by price inline control (only Asc/Desc; no "None", no separate button)
-    const sortWrap = document.createElement('div');
-    sortWrap.className = 'sort-inline';
-    const sortSel = document.createElement('select');
-    sortSel.className = 'select-small';
-    const optAsc = document.createElement('option'); optAsc.value = 'asc'; optAsc.textContent = 'Giá tăng dần';
-    const optDesc = document.createElement('option'); optDesc.value = 'desc'; optDesc.textContent = 'Giá giảm dần';
-    sortSel.appendChild(optAsc);
-    sortSel.appendChild(optDesc);
-    // default to asc if priceSortMode not set
-    sortSel.value = priceSortMode || 'asc';
-    sortSel.onchange = ()=> {
-      const val = sortSel.value;
-      priceSortMode = val; // always 'asc' or 'desc'
-      if(activeTab === 'all') applyPriceSortAndRender(priceSortMode);
-      else renderAccording();
-    };
-    sortWrap.appendChild(sortSel);
-    left.appendChild(sortWrap);
+// tạo nút "Chọn theo excel"
+const chooseExcelBtn = document.createElement('button');
+chooseExcelBtn.className = 'btn tab-like';
+chooseExcelBtn.textContent = 'Chọn theo excel';
+chooseExcelBtn.style.display = multiSelectMode ? 'inline-block' : 'none';
+chooseExcelBtn.style.marginLeft = '10px'; // khoảng cách giữa nút excel và nút Hủy
+// không kiểm tra login ở đây (theo yêu cầu) — nếu bạn muốn giới hạn lại, thêm kiểm tra getRole() tại đây
+chooseExcelBtn.onclick = async () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.xlsx,.xls';
+  input.onchange = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    try {
+      const ab = await f.arrayBuffer();
+      const wb = XLSX.read(ab, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }); // array of arrays, first row = header
+      if(!rows || rows.length === 0) return alert('File Excel rỗng.');
+
+      // try find header indices by fuzzy match; fall back to B=1, C=2, I=8 (zero-based indexes)
+      const header = (rows[0] || []).map(h => (h || '').toString().trim().toLowerCase());
+      function findIndex(candidates){
+        for(const cand of candidates){
+          const lc = cand.toLowerCase();
+          const idx = header.findIndex(h => h === lc || (h && h.indexOf(lc) !== -1));
+          if(idx >= 0) return idx;
+        }
+        return -1;
+      }
+      const idxGroup = findIndex(['nhóm hàng(3 cấp)','nhóm hàng','nhóm','nhóm hàng 3 cấp']); // col B prefer
+      const idxCode  = findIndex(['mã hàng','mã','mã sản phẩm','code']) ;
+      const idxStock = findIndex(['tồn kho','tồn','quantity','on hand','stock']); // col I prefer
+      const colGroup = idxGroup >= 0 ? idxGroup : 1;
+      const colCode  = idxCode  >= 0 ? idxCode  : 2;
+      const colStock = idxStock >= 0 ? idxStock : 8;
+
+      const codesSet = new Set();
+      for(let i = 1; i < rows.length; i++){
+        const row = rows[i] || [];
+        const rawGroup = (row[colGroup] === undefined || row[colGroup] === null) ? '' : String(row[colGroup]).trim();
+        const rawStock = row[colStock];
+        const rawCode = (row[colCode] === undefined || row[colCode] === null) ? '' : String(row[colCode]).trim();
+
+        // normalize group: match words 'giày' and 'bóng rổ' (case-insensitive, ignore accents)
+        const groupNorm = rawGroup.toLowerCase();
+        const isBasket = groupNorm.includes('giày') && groupNorm.includes('bóng') && groupNorm.includes('rổ') || groupNorm === 'giày bóng rổ' || groupNorm.includes('giày bóng rổ');
+
+        // check stock == 0 (handle number or string)
+        let isZero = false;
+        if (rawStock === 0 || rawStock === '0' || rawStock === '0.0' || rawStock === 0.0) isZero = true;
+        else {
+          const num = Number(String(rawStock || '').replace(/,/g,'.').trim());
+          if (!isNaN(num) && num === 0) isZero = true;
+        }
+
+        if (isBasket && isZero && rawCode) codesSet.add(String(rawCode));
+      }
+
+      if (codesSet.size === 0){
+        alert('Không tìm thấy mã nào thỏa điều kiện (Nhóm="Giày Bóng Rổ" và Tồn kho=0). Hãy kiểm tra file hoặc header.');
+        return;
+      }
+
+      const codes = Array.from(codesSet);
+      const preview = codes.slice(0, 200).join(', '); // limit length
+      //if(!confirm(`Tìm được ${codes.length} mã:\n${preview}${codes.length>200?'\n... (bỏ qua phần còn lại)': ''}\n\nOK để tích những mã này trên web?`)) return;
+
+      // bật multiSelectMode và chọn các mã tìm thấy (nếu có trong manifest)
+      // ensure multiSelectMode on and add to selectedItems for matching sizes
+multiSelectMode = true;
+
+const matched = [];   // unique codes that exist in manifest
+const notFound = [];  // codes not found at all
+
+for (const rawCode of codes) {
+  const code = String(rawCode || '').trim();
+  if (!code) continue;
+  let foundAny = false;
+
+  for (const s of (manifest && manifest.sizes || [])) {
+    const sizeKey = String(s.size || '').trim();
+    if (manifestMap[sizeKey] && manifestMap[sizeKey][code]) {
+      // add every matching size|code pair (so user can delete exact items)
+      selectedItems.add(`${sizeKey}|${code}`);
+      foundAny = true;
+    }
+  }
+
+  if (foundAny) {
+    if (!matched.includes(code)) matched.push(code);
+  } else {
+    notFound.push(code);
+  }
+}
+
+// show summary to user
+const previewMatched = matched.slice(0, 200).join(', ');
+let summary = `Tổng mã trong file: ${codes.length}\nMã khớp trên manifest: ${matched.length}\nMã không tìm thấy: ${notFound.length}\n\nMã khớp : ${previewMatched}`;
+if (matched.length > 200) summary += '\n... (bỏ qua phần còn lại)';
+if (notFound.length > 0) summary += `\n\nMột số mã NOT FOUND: ${notFound.slice(0,20).join(', ')}${notFound.length>20?'\n...':''}`;
+
+alert(summary);
+
+// reflect UI
+try { updateBodyMultiselectClass(); } catch(e){/* optional */ }
+floatDelete.style.display = 'block';
+if (typeof chooseExcelBtn !== 'undefined' && chooseExcelBtn) chooseExcelBtn.style.display = 'inline-block';
+renderAccording();
+
+      updateBodyMultiselectClass();
+      floatDelete.style.display = 'block';
+      // ensure chooseExcelBtn visible now
+      chooseExcelBtn.style.display = 'inline-block';
+      renderAccording();
+    } catch(err){
+      console.error('Import excel error', err);
+      alert('Lỗi khi đọc file Excel: ' + (err && err.message ? err.message : err));
+    }
+  };
+  input.click();
+};
+
+// append toggle + chooseExcel + sort
+left.appendChild(toggleBtn);
+left.appendChild(chooseExcelBtn);
+
+// sort by price inline control (unchanged)
+const sortWrap = document.createElement('div');
+sortWrap.className = 'sort-inline';
+const sortSel = document.createElement('select');
+sortSel.className = 'select-small';
+const optAsc = document.createElement('option'); optAsc.value = 'asc'; optAsc.textContent = 'Giá tăng dần';
+const optDesc = document.createElement('option'); optDesc.value = 'desc'; optDesc.textContent = 'Giá giảm dần';
+sortSel.appendChild(optAsc); sortSel.appendChild(optDesc);
+sortSel.value = priceSortMode || 'asc';
+sortSel.onchange = ()=>{ priceSortMode = sortSel.value; if(activeTab === 'all') applyPriceSortAndRender(priceSortMode); else renderAccording(); };
+sortWrap.appendChild(sortSel);
+left.appendChild(sortWrap);
+
+// override toggle behavior (uses closure so chooseExcelBtn can be updated)
+toggleBtn.onclick = ()=> {
+  multiSelectMode = !multiSelectMode;
+  if(!multiSelectMode) selectedItems.clear();
+  updateBodyMultiselectClass();
+  floatDelete.style.display = multiSelectMode ? 'block' : 'none';
+  // show chooseExcelBtn only when multiSelectMode ON
+  chooseExcelBtn.style.display = multiSelectMode ? 'inline-block' : 'none';
+  // update label text
+  toggleBtn.textContent = multiSelectMode ? 'Hủy' : 'Chọn xóa';
+  renderAccording();
+};
+
 
   } else {
     const spacer = document.createElement('div'); spacer.style.height='1px'; spacer.style.display='inline-block'; left.appendChild(spacer);
@@ -1406,7 +1550,7 @@ importVonBtn.addEventListener('click', ()=> importVonInput.click());
 importVonInput.addEventListener('change', async (e) => {
   const f = importVonInput.files && importVonInput.files[0];
   if(!f) return;
-  if(!confirm('Import giá vốn: file sẽ được đọc cột C = code, cột H = giá vốn. Tiếp tục?')) { importVonInput.value=''; return; }
+  if(!confirm('Import giá vốn: file sẽ được đọc cột G = code, cột C = giá vốn. Tiếp tục?')) { importVonInput.value=''; return; }
   try {
     const ab = await f.arrayBuffer();
     const wb = XLSX.read(ab, { type: 'array' });
@@ -1416,10 +1560,10 @@ importVonInput.addEventListener('change', async (e) => {
     const rows = [];
     // assume headers at row 0; start at row 1
     for (let r = range.s.r + 1; r <= range.e.r; r++) {
+      const cellG = ws[XLSX.utils.encode_cell({c:6, r})]; // G
       const cellC = ws[XLSX.utils.encode_cell({c:2, r})]; // C
-      const cellH = ws[XLSX.utils.encode_cell({c:7, r})]; // H
-      const code = cellC && cellC.v ? String(cellC.v).trim() : '';
-      const von = cellH && (cellH.v !== undefined && cellH.v !== null) ? String(cellH.v).replace(/[^\d]/g,'').trim() : '';
+      const code = cellG && cellG.v ? String(cellC.v).trim() : '';
+      const von = cellC && (cellC.v !== undefined && cellH.v !== null) ? String(cellH.v).replace(/[^\d]/g,'').trim() : '';
       if (code) rows.push({ code, von });
     }
     if (rows.length === 0) return alert('Không tìm thấy dòng hợp lệ trong file.');
