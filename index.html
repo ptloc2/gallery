@@ -1614,104 +1614,128 @@ function initExportThumbs(){
   btn.onclick = openExportThumbsUI;
 }
 
-/* lightweight helpers used by the generator (define only if missing) */
-if (typeof sleep === 'undefined') function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+/* helpers used by the generator */
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-
-  function loadImageElement(url, timeout = 12000) {
-    return new Promise((resolve) => {
-      try {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        let done = false;
-        const t = setTimeout(()=> {
-          if (done) return;
-          done = true;
-          try{ img.src = ''; }catch(e){}
-          resolve(null);
-        }, timeout);
-        img.onload = () => {
-          if (done) return;
-          done = true;
-          clearTimeout(t);
-          resolve(img);
-        };
-        img.onerror = () => {
-          if (done) return;
-          done = true;
-          clearTimeout(t);
-          resolve(null);
-        };
-        img.src = url;
-      } catch(e){
+function loadImageElement(url, timeout = 12000) {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      let done = false;
+      const t = setTimeout(()=> {
+        if (done) return;
+        done = true;
+        try{ img.src = ''; }catch(e){}
         resolve(null);
-      }
-    });
+      }, timeout);
+      img.onload = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        resolve(img);
+      };
+      img.onerror = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        resolve(null);
+      };
+      img.src = url;
+    } catch(e){
+      resolve(null);
+    }
+  });
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  const radius = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+async function createGridFromUrls(urls, opts = {}) {
+  const cols = Number(opts.cols || 6);
+  const rows = Number(opts.rows || 6);
+  const gap = Number(opts.gap || 8);
+  const thumbSize = Number(opts.thumbSize || 160);
+  const cornerRadius = Number(opts.cornerRadius || 10);
+  const perGrid = cols * rows;
+
+  const canvasW = cols * thumbSize + (cols + 1) * gap;
+  const canvasH = rows * thumbSize + (rows + 1) * gap;
+
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? Math.max(1, Math.floor(window.devicePixelRatio)) : 1;
+
+  let canvas, ctx;
+  if (typeof OffscreenCanvas !== 'undefined') {
+    canvas = new OffscreenCanvas(canvasW * dpr, canvasH * dpr);
+    ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+  } else {
+    canvas = document.createElement('canvas');
+    canvas.width = Math.round(canvasW * dpr);
+    canvas.height = Math.round(canvasH * dpr);
+    canvas.style.width = canvasW + 'px';
+    canvas.style.height = canvasH + 'px';
+    ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
   }
 
+  ctx.fillStyle = opts.bg || '#ffffff';
+  ctx.fillRect(0,0,canvasW,canvasH);
 
+  for (let i = 0; i < perGrid; i++) {
+    const url = urls[i];
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    const x = gap + c * (thumbSize + gap);
+    const y = gap + r * (thumbSize + gap);
 
-  async function createGridFromUrls(urls, opts = {}) {
-    const cols = Number(opts.cols || 6);
-    const rows = Number(opts.rows || 6);
-    const gap = Number(opts.gap || 8);
-    const thumbSize = Number(opts.thumbSize || 160);
-    const perGrid = cols * rows;
+    if (!url) continue;
 
-    const canvasW = cols * thumbSize + (cols + 1) * gap;
-    const canvasH = rows * thumbSize + (rows + 1) * gap;
+    const img = await loadImageElement(url, 14000);
+    if (!img) continue;
 
-    let canvas, ctx;
-    if (typeof OffscreenCanvas !== 'undefined') {
-      canvas = new OffscreenCanvas(canvasW, canvasH);
-      ctx = canvas.getContext('2d');
-    } else {
-      canvas = document.createElement('canvas');
-      canvas.width = canvasW;
-      canvas.height = canvasH;
-      ctx = canvas.getContext('2d');
+    try {
+      ctx.save();
+      roundRectPath(ctx, x, y, thumbSize, thumbSize, cornerRadius);
+      ctx.clip();
+
+      const iw = img.naturalWidth || img.width || thumbSize;
+      const ih = img.naturalHeight || img.height || thumbSize;
+      const scale = Math.max(thumbSize / iw, thumbSize / ih);
+      const dw = Math.ceil(iw * scale);
+      const dh = Math.ceil(ih * scale);
+      const dx = x + Math.floor((thumbSize - dw) / 2);
+      const dy = y + Math.floor((thumbSize - dh) / 2);
+      ctx.drawImage(img, dx, dy, dw, dh);
+
+      ctx.restore();
+    } catch (e){
+      try { ctx.restore(); } catch(e){}
+    } finally {
+      try { img.src = ''; } catch(e){}
     }
 
-    ctx.fillStyle = opts.bg || '#ffffff';
-    ctx.fillRect(0,0,canvasW,canvasH);
-
-    for (let i = 0; i < perGrid; i++) {
-      const url = urls[i];
-      const r = Math.floor(i / cols);
-      const c = i % cols;
-      const x = gap + c * (thumbSize + gap);
-      const y = gap + r * (thumbSize + gap);
-
-      if (!url) continue;
-
-      const img = await loadImageElement(url, 14000);
-      if (!img) continue;
-
-      try {
-        const iw = img.naturalWidth || img.width || thumbSize;
-        const ih = img.naturalHeight || img.height || thumbSize;
-        const scale = Math.max(thumbSize / iw, thumbSize / ih);
-        const dw = Math.ceil(iw * scale);
-        const dh = Math.ceil(ih * scale);
-        const dx = x + Math.floor((thumbSize - dw) / 2);
-        const dy = y + Math.floor((thumbSize - dh) / 2);
-        ctx.drawImage(img, dx, dy, dw, dh);
-      } catch (e){
-        console.warn('drawImage failed', e);
-      } finally {
-        try { img.src = ''; } catch(e){}
-      }
-
-      if (i % 6 === 0) await sleep(20);
-    }
-
-    if (canvas.convertToBlob) {
-      return await canvas.convertToBlob({ type: 'image/png' });
-    } else {
-      return await new Promise((resolve) => canvas.toBlob((b)=>resolve(b), 'image/png', 0.92));
-    }
+    if (i % 6 === 0) await sleep(20);
   }
 
+  if (canvas.convertToBlob) {
+    return await canvas.convertToBlob({ type: 'image/png' });
+  } else {
+    return await new Promise((resolve) => canvas.toBlob((b)=>resolve(b), 'image/png', 0.92));
+  }
+}
 
 /* utility: chunk array */
 function chunkArray(arr, size){
@@ -1720,22 +1744,15 @@ function chunkArray(arr, size){
   return out;
 }
 
-/* sanitize filename (keep simple) */
-function sanitizeName(s){
-  return String(s||'').replace(/^Size\s*/i,'').replace(/\s+/g,'_').replace(/[^\w\-\.]/g,'');
-}
-
-/* build thumb URL - prefer thumbnail cache path if present */
+/* build thumb URL - direct original path (no 'thumbnails' folder) */
 function buildThumbUrl(size, code, thumbName='thumb.jpeg'){
   const encSize = encodeURIComponent(String(size).trim());
   const encCode = encodeURIComponent(String(code).trim());
-  // prefer cached thumbnail under thumbnails; fallback to original
   return `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
 }
 
 /* open small UI for choosing which sizes / all then export */
 function openExportThumbsUI(){
-  // build panel
   const panel = document.createElement('div');
   panel.style.minWidth='360px';
   panel.style.maxHeight='70vh';
@@ -1749,20 +1766,13 @@ function openExportThumbsUI(){
   title.style.fontWeight='700'; title.textContent = 'Xuất thumbnails (grid 6×6)';
   panel.appendChild(title);
 
-  // controls row
   const controls = document.createElement('div');
   controls.style.display='flex'; controls.style.gap='8px'; controls.style.alignItems='center';
   const allCheckbox = document.createElement('input'); allCheckbox.type='checkbox'; allCheckbox.id='export_thumbs_all';
   const allLabel = document.createElement('label'); allLabel.htmlFor='export_thumbs_all'; allLabel.textContent = 'Tất cả kích cỡ (All)';
   controls.appendChild(allCheckbox); controls.appendChild(allLabel);
-
-  const tickAllBtn = document.createElement('button'); tickAllBtn.className='btn'; tickAllBtn.textContent='Tick all';
-  const untickAllBtn = document.createElement('button'); untickAllBtn.className='btn'; untickAllBtn.textContent='Untick all';
-  controls.appendChild(tickAllBtn); controls.appendChild(untickAllBtn);
-
   panel.appendChild(controls);
 
-  // sizes list
   const listWrap = document.createElement('div');
   listWrap.style.display='grid';
   listWrap.style.gridTemplateColumns='repeat(2,1fr)';
@@ -1780,48 +1790,37 @@ function openExportThumbsUI(){
   });
   panel.appendChild(listWrap);
 
-  // action buttons
   const actions = document.createElement('div'); actions.style.display='flex'; actions.style.justifyContent='flex-end'; actions.style.gap='8px';
   const btnCancel = document.createElement('button'); btnCancel.className='btn'; btnCancel.textContent='Đóng';
   const btnExport = document.createElement('button'); btnExport.className='btn primary'; btnExport.textContent='Xuất';
   actions.appendChild(btnCancel); actions.appendChild(btnExport);
   panel.appendChild(actions);
 
-  // wiring
-  tickAllBtn.onclick = ()=>{ listWrap.querySelectorAll('input.export-size-checkbox').forEach(i=>i.checked=true); allCheckbox.checked = true; };
-  untickAllBtn.onclick = ()=>{ listWrap.querySelectorAll('input.export-size-checkbox').forEach(i=>i.checked=false); allCheckbox.checked = false; };
-
   allCheckbox.onchange = ()=> {
     const v = allCheckbox.checked;
     listWrap.querySelectorAll('input.export-size-checkbox').forEach(i=>i.checked = v);
   };
 
-  // create modal using existing showModal helper
   showModal('Xuất thumbnails', panel);
 
   btnCancel.onclick = ()=>{ document.getElementById('modalClose').click(); };
 
   btnExport.onclick = async ()=>{
-    // find selected sizes
     const checked = Array.from(listWrap.querySelectorAll('input.export-size-checkbox:checked')).map(i=>String(i.dataset.size));
-    const exportAll = allCheckbox.checked || checked.length === 0; // if none selected treat as All
+    const exportAll = allCheckbox.checked || checked.length === 0;
     let sizesToExport;
     if (exportAll) sizesToExport = sizes.slice();
     else sizesToExport = checked.slice();
 
     if (!sizesToExport || sizesToExport.length === 0) { alert('Không có kích cỡ để xuất'); return; }
 
-    // prepare list of pages to build:
-    // for "All" we will combine across sizes in ascending order
     const perGrid = 36;
-    const thumbPixel = 220;
+    const thumbPixel = 360;
 
-    // build a flat array of {size,code,thumbName}
     const items = [];
     for (const sz of sizesToExport) {
       const sObj = manifest.sizes.find(x => String(x.size) === String(sz));
       if (!sObj || !Array.isArray(sObj.barcodes)) continue;
-      // iterate barcodes in original order
       for (const b of sObj.barcodes) {
         const tn = (Array.isArray(b.images) && b.images.find(n=>/thumb/i.test(n))) || (Array.isArray(b.images) && b.images[0]) || 'thumb.jpeg';
         items.push({ size: sz, code: String(b.code), thumbName: tn });
@@ -1830,19 +1829,14 @@ function openExportThumbsUI(){
 
     if (items.length === 0) { alert('Không có ảnh để xuất'); return; }
 
-    // if exporting per-size individually (not combined All), group by size and process per size
-    // but when user selected multiple sizes and allCheckbox is true we already combined above
-    // build pages of urls for processing
     const allUrls = items.map(it => buildThumbUrl(it.size, it.code, it.thumbName));
     const pages = chunkArray(allUrls, perGrid);
 
-    // progress UI
     showProgressPanel();
     groupsContainer.innerHTML = '';
     const groupEl = createGroupProgress('export-thumbs', `Xuất thumbnails — Tổng trang: ${pages.length}`);
     updateOverallProgress(0, pages.length);
 
-    // if JSZip available we will store in zip and then save, else download each file sequentially
     const useZip = (typeof JSZip !== 'undefined');
     const zip = useZip ? new JSZip() : null;
 
@@ -1850,16 +1844,12 @@ function openExportThumbsUI(){
     for (const pageUrls of pages) {
       pageIdx++;
       try {
-        // create grid sequentially
-        const blob = await createGridFromUrls(pageUrls, { cols:6, rows:6, thumbSize: thumbPixel, gap:8, bg:'#ffffff' });
-        const fname = (sizesToExport.length === 1)
-                      ? `${sanitizeName(sizesToExport[0])}_P${pageIdx}.png`
-                      : `All_P${pageIdx}.png`;
+        const blob = await createGridFromUrls(pageUrls, { cols:6, rows:6, thumbSize: thumbPixel, gap:4, bg:'#ffffff', cornerRadius:7});
+        const fname = pages.length === 1 ? `Thumbnail.png` : `Thumbnail_P${pageIdx}.png`;
 
-        if (useZip) {
+        if (useZip && zip) {
           zip.file(fname, blob);
         } else {
-          // download immediately (one by one)
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
@@ -1868,7 +1858,6 @@ function openExportThumbsUI(){
           a.click();
           a.remove();
           URL.revokeObjectURL(url);
-          // small yield
           await sleep(120);
         }
 
@@ -1878,21 +1867,19 @@ function openExportThumbsUI(){
         markGroupDone(groupEl, false, `Page ${pageIdx} error`);
       }
       updateOverallProgress(pageIdx, pages.length);
-      await sleep(80); // yield between pages
+      await sleep(80);
     }
 
-    // finalize zip if used
     if (useZip && zip) {
       try {
         const content = await zip.generateAsync({ type: 'blob' }, (meta) => {
-          // update progress UI (meta.percent available)
           const pct = Math.round(meta.percent || 0);
           overallBar.style.width = pct + '%';
           overallPercent.textContent = pct + '%';
         });
         const u = URL.createObjectURL(content);
         const a = document.createElement('a'); a.href = u;
-        a.download = `thumbnails_${PREFIX}_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.zip`;
+        a.download = `Thumbnail_${PREFIX}_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.zip`;
         document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u);
       } catch(e){
         console.error('Zip create failed', e);
@@ -1900,7 +1887,6 @@ function openExportThumbsUI(){
       }
     }
 
-    // done
     markGroupDone(groupEl, true, 'Hoàn tất');
     updateOverallProgress(pages.length, pages.length);
     await sleep(300);
@@ -1915,9 +1901,6 @@ function openExportThumbsUI(){
   try{ initExportThumbs(); }catch(e){console.warn('initExportThumbs fail', e);}
 })();
  // ---------- end Thumbnail export ----------
-
-
-
 </script>
 </body>
 </html>
