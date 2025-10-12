@@ -1613,265 +1613,310 @@ function initExportThumbs(){
   btn.style.display = (role === 'anon') ? 'none' : 'inline-block';
   btn.onclick = openExportThumbsUI;
 }
-function updateExportThumbsVisibility(){
-  const btn = document.getElementById('btn-export-thumbs');
-  if(!btn) return;
-  const role = (typeof getRole === 'function') ? getRole() : 'anon';
-  btn.style.display = (role === 'anon') ? 'none' : 'inline-block';
-}
 
-function openExportThumbsUI(){
-  if(typeof getRole === 'function' && getRole() === 'anon'){
-    return alert('Vui lòng đăng nhập để xuất thumbnail.');
+/* lightweight helpers used by the generator (define only if missing) */
+if (typeof sleep === 'undefined') function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+
+  function loadImageElement(url, timeout = 12000) {
+    return new Promise((resolve) => {
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        let done = false;
+        const t = setTimeout(()=> {
+          if (done) return;
+          done = true;
+          try{ img.src = ''; }catch(e){}
+          resolve(null);
+        }, timeout);
+        img.onload = () => {
+          if (done) return;
+          done = true;
+          clearTimeout(t);
+          resolve(img);
+        };
+        img.onerror = () => {
+          if (done) return;
+          done = true;
+          clearTimeout(t);
+          resolve(null);
+        };
+        img.src = url;
+      } catch(e){
+        resolve(null);
+      }
+    });
   }
 
-  const container = document.createElement('div');
-  container.style.padding = '12px';
-  container.style.minWidth = '320px';
-  container.style.maxHeight = '60vh';
-  container.style.overflow = 'auto';
-  container.style.display = 'flex';
-  container.style.flexDirection = 'column';
-  container.style.gap = '8px';
+
+
+  async function createGridFromUrls(urls, opts = {}) {
+    const cols = Number(opts.cols || 6);
+    const rows = Number(opts.rows || 6);
+    const gap = Number(opts.gap || 8);
+    const thumbSize = Number(opts.thumbSize || 160);
+    const perGrid = cols * rows;
+
+    const canvasW = cols * thumbSize + (cols + 1) * gap;
+    const canvasH = rows * thumbSize + (rows + 1) * gap;
+
+    let canvas, ctx;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      canvas = new OffscreenCanvas(canvasW, canvasH);
+      ctx = canvas.getContext('2d');
+    } else {
+      canvas = document.createElement('canvas');
+      canvas.width = canvasW;
+      canvas.height = canvasH;
+      ctx = canvas.getContext('2d');
+    }
+
+    ctx.fillStyle = opts.bg || '#ffffff';
+    ctx.fillRect(0,0,canvasW,canvasH);
+
+    for (let i = 0; i < perGrid; i++) {
+      const url = urls[i];
+      const r = Math.floor(i / cols);
+      const c = i % cols;
+      const x = gap + c * (thumbSize + gap);
+      const y = gap + r * (thumbSize + gap);
+
+      if (!url) continue;
+
+      const img = await loadImageElement(url, 14000);
+      if (!img) continue;
+
+      try {
+        const iw = img.naturalWidth || img.width || thumbSize;
+        const ih = img.naturalHeight || img.height || thumbSize;
+        const scale = Math.max(thumbSize / iw, thumbSize / ih);
+        const dw = Math.ceil(iw * scale);
+        const dh = Math.ceil(ih * scale);
+        const dx = x + Math.floor((thumbSize - dw) / 2);
+        const dy = y + Math.floor((thumbSize - dh) / 2);
+        ctx.drawImage(img, dx, dy, dw, dh);
+      } catch (e){
+        console.warn('drawImage failed', e);
+      } finally {
+        try { img.src = ''; } catch(e){}
+      }
+
+      if (i % 6 === 0) await sleep(20);
+    }
+
+    if (canvas.convertToBlob) {
+      return await canvas.convertToBlob({ type: 'image/png' });
+    } else {
+      return await new Promise((resolve) => canvas.toBlob((b)=>resolve(b), 'image/png', 0.92));
+    }
+  }
+
+
+/* utility: chunk array */
+function chunkArray(arr, size){
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/* sanitize filename (keep simple) */
+function sanitizeName(s){
+  return String(s||'').replace(/^Size\s*/i,'').replace(/\s+/g,'_').replace(/[^\w\-\.]/g,'');
+}
+
+/* build thumb URL - prefer thumbnail cache path if present */
+function buildThumbUrl(size, code, thumbName='thumb.jpeg'){
+  const encSize = encodeURIComponent(String(size).trim());
+  const encCode = encodeURIComponent(String(code).trim());
+  // prefer cached thumbnail under thumbnails; fallback to original
+  return `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
+}
+
+/* open small UI for choosing which sizes / all then export */
+function openExportThumbsUI(){
+  // build panel
+  const panel = document.createElement('div');
+  panel.style.minWidth='360px';
+  panel.style.maxHeight='70vh';
+  panel.style.overflow='auto';
+  panel.style.padding='12px';
+  panel.style.display='flex';
+  panel.style.flexDirection='column';
+  panel.style.gap='8px';
 
   const title = document.createElement('div');
-  title.style.fontWeight = 700; title.textContent = 'Xuất thumbnail';
-  container.appendChild(title);
+  title.style.fontWeight='700'; title.textContent = 'Xuất thumbnails (grid 6×6)';
+  panel.appendChild(title);
 
-  const ctlRow = document.createElement('div'); ctlRow.style.display='flex'; ctlRow.style.gap='8px'; ctlRow.style.alignItems='center';
-  const btnTickAll = document.createElement('button'); btnTickAll.className='btn'; btnTickAll.textContent='Tick all';
-  const btnUntickAll = document.createElement('button'); btnUntickAll.className='btn'; btnUntickAll.textContent='Untick all';
-  ctlRow.appendChild(btnTickAll); ctlRow.appendChild(btnUntickAll);
-  container.appendChild(ctlRow);
+  // controls row
+  const controls = document.createElement('div');
+  controls.style.display='flex'; controls.style.gap='8px'; controls.style.alignItems='center';
+  const allCheckbox = document.createElement('input'); allCheckbox.type='checkbox'; allCheckbox.id='export_thumbs_all';
+  const allLabel = document.createElement('label'); allLabel.htmlFor='export_thumbs_all'; allLabel.textContent = 'Tất cả kích cỡ (All)';
+  controls.appendChild(allCheckbox); controls.appendChild(allLabel);
 
-  const listWrap = document.createElement('div'); listWrap.style.display='flex'; listWrap.style.flexDirection='column'; listWrap.style.gap='6px';
-  const allRow = document.createElement('label'); allRow.style.display='flex'; allRow.style.alignItems='center'; allRow.style.gap='8px';
-  const allCb = document.createElement('input'); allCb.type='checkbox'; allCb.style.transform='scale(1.1)';
-  const allText = document.createElement('span'); allText.textContent = 'Tất cả';
-  allRow.appendChild(allCb); allRow.appendChild(allText);
-  listWrap.appendChild(allRow);
+  const tickAllBtn = document.createElement('button'); tickAllBtn.className='btn'; tickAllBtn.textContent='Tick all';
+  const untickAllBtn = document.createElement('button'); untickAllBtn.className='btn'; untickAllBtn.textContent='Untick all';
+  controls.appendChild(tickAllBtn); controls.appendChild(untickAllBtn);
 
-  const sizeCheckboxes = [];
-  (manifest && Array.isArray(manifest.sizes) ? manifest.sizes : []).forEach(s=>{
-    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px';
-    const cb = document.createElement('input'); cb.type='checkbox';
-    cb.dataset.size = String(s.size);
-    const txt = document.createElement('span'); txt.textContent = String(s.size);
-    row.appendChild(cb); row.appendChild(txt);
-    listWrap.appendChild(row);
-    sizeCheckboxes.push(cb);
+  panel.appendChild(controls);
+
+  // sizes list
+  const listWrap = document.createElement('div');
+  listWrap.style.display='grid';
+  listWrap.style.gridTemplateColumns='repeat(2,1fr)';
+  listWrap.style.gap='6px';
+
+  const sizes = (manifest && Array.isArray(manifest.sizes)) ? manifest.sizes.map(s=>String(s.size)) : [];
+  sizes.forEach(sz=>{
+    const label = document.createElement('label');
+    label.style.display='flex'; label.style.gap='8px'; label.style.alignItems='center';
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.className='export-size-checkbox'; cb.dataset.size = sz;
+    label.appendChild(cb);
+    const txt = document.createElement('span'); txt.textContent = String(sz);
+    label.appendChild(txt);
+    listWrap.appendChild(label);
   });
-  container.appendChild(listWrap);
+  panel.appendChild(listWrap);
 
-  const footer = document.createElement('div'); footer.style.display='flex'; footer.style.justifyContent='flex-end'; footer.style.gap='8px';
-  const cancelBtn = document.createElement('button'); cancelBtn.className='btn'; cancelBtn.textContent='Huỷ';
-  const exportBtn = document.createElement('button'); exportBtn.className='btn primary'; exportBtn.textContent = 'Xuất';
-  footer.appendChild(cancelBtn); footer.appendChild(exportBtn);
-  container.appendChild(footer);
+  // action buttons
+  const actions = document.createElement('div'); actions.style.display='flex'; actions.style.justifyContent='flex-end'; actions.style.gap='8px';
+  const btnCancel = document.createElement('button'); btnCancel.className='btn'; btnCancel.textContent='Đóng';
+  const btnExport = document.createElement('button'); btnExport.className='btn primary'; btnExport.textContent='Xuất';
+  actions.appendChild(btnCancel); actions.appendChild(btnExport);
+  panel.appendChild(actions);
 
-  btnTickAll.onclick = ()=> { sizeCheckboxes.forEach(cb=>cb.checked=true); allCb.checked = true; };
-  btnUntickAll.onclick = ()=> { sizeCheckboxes.forEach(cb=>cb.checked=false); allCb.checked = false; };
+  // wiring
+  tickAllBtn.onclick = ()=>{ listWrap.querySelectorAll('input.export-size-checkbox').forEach(i=>i.checked=true); allCheckbox.checked = true; };
+  untickAllBtn.onclick = ()=>{ listWrap.querySelectorAll('input.export-size-checkbox').forEach(i=>i.checked=false); allCheckbox.checked = false; };
 
-  // allCb: override flag — do not toggle individual boxes
-  allCb.onchange = ()=> { /* no-op */ };
-  sizeCheckboxes.forEach(cb => { cb.onchange = ()=> { /* no-op */ }; });
-
-  cancelBtn.onclick = ()=> { modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); };
-
-    exportBtn.onclick = async ()=>{
-    const exportAll = allCb.checked === true;
-    // always collect any individually selected sizes
-    const selected = [];
-    sizeCheckboxes.forEach(cb=>{ if(cb.checked) selected.push(cb.dataset.size); });
-    // if nothing selected and not exportAll -> error
-    if (!exportAll && selected.length === 0) { alert('Chọn ít nhất 1 size (hoặc tick "Tất cả").'); return; }
-
-    // sizesToProcess passed to function: we pass selected (may be empty) and exportAll flag
-    const sizesToProcess = selected.slice();
-
-    // close modal
-    modal.classList.remove('open'); modal.setAttribute('aria-hidden','true');
-
-    try {
-      await exportThumbnailsForSizes(sizesToProcess, !!exportAll);
-    } catch(e) {
-      console.error('exportThumbnailsForSizes error', e);
-      alert('Lỗi khi xuất thumbnail: ' + (e && e.message ? e.message : e));
-    }
+  allCheckbox.onchange = ()=> {
+    const v = allCheckbox.checked;
+    listWrap.querySelectorAll('input.export-size-checkbox').forEach(i=>i.checked = v);
   };
 
+  // create modal using existing showModal helper
+  showModal('Xuất thumbnails', panel);
 
-  showModal('Xuất thumbnail', container);
-}
+  btnCancel.onclick = ()=>{ document.getElementById('modalClose').click(); };
 
-function chunkArray(arr, size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
+  btnExport.onclick = async ()=>{
+    // find selected sizes
+    const checked = Array.from(listWrap.querySelectorAll('input.export-size-checkbox:checked')).map(i=>String(i.dataset.size));
+    const exportAll = allCheckbox.checked || checked.length === 0; // if none selected treat as All
+    let sizesToExport;
+    if (exportAll) sizesToExport = sizes.slice();
+    else sizesToExport = checked.slice();
 
-async function fetchImageBitmaps(urls, concurrency = 6){
-  const results = new Array(urls.length);
-  let idx = 0;
-  async function worker(){
-    while(true){
-      const i = idx++; if(i >= urls.length) break;
-      const u = urls[i];
-      try{
-        const res = await fetch(u, { mode:'cors', cache:'no-store' });
-        if(!res.ok){ results[i] = null; continue; }
-        const blob = await res.blob();
-        const imgBitmap = await createImageBitmap(blob);
-        results[i] = imgBitmap;
-      }catch(e){ console.warn('fetch image failed', u, e); results[i] = null; }
-    }
-  }
-  await Promise.all(new Array(Math.min(concurrency, urls.length)).fill(0).map(()=>worker()));
-  return results;
-}
+    if (!sizesToExport || sizesToExport.length === 0) { alert('Không có kích cỡ để xuất'); return; }
 
-async function createGridImageBitmaps(bitmaps, opts = {}){
-  const cols = 6, rows = 6;
-  const thumbSize = opts.thumbSize || 160;
-  const gap = (typeof opts.gap === 'number') ? opts.gap : 8;
-  const borderRadius = (typeof opts.borderRadius === 'number') ? opts.borderRadius : 10;
-  const strokeWidth = 2;
-  const cellW = thumbSize;
-  const cellH = thumbSize;
-  const canvasW = cols * cellW + (cols + 1) * gap;
-  const canvasH = rows * cellH + (rows + 1) * gap;
-  const cvs = document.createElement('canvas');
-  cvs.width = canvasW; cvs.height = canvasH;
-  const ctx = cvs.getContext('2d');
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvasW,canvasH);
-  for(let r=0;r<rows;r++){
-    for(let c=0;c<cols;c++){
-      const idx = r*cols + c;
-      const x = gap + c * (cellW + gap);
-      const y = gap + r * (cellH + gap);
-      if(idx < bitmaps.length && bitmaps[idx]){
-        const bmp = bitmaps[idx];
-        roundRectPath(ctx, x, y, cellW, cellH, borderRadius);
-        ctx.save(); ctx.clip();
-        const sw = bmp.width, sh = bmp.height;
-        const scale = Math.max(cellW / sw, cellH / sh);
-        const dw = sw * scale, dh = sh * scale;
-        const dx = x - (dw - cellW)/2;
-        const dy = y - (dh - cellH)/2;
-        ctx.drawImage(bmp, dx, dy, dw, dh);
-        ctx.restore();
-        ctx.strokeStyle = '#eee'; ctx.lineWidth = strokeWidth;
-        roundRectPath(ctx, x + strokeWidth/2, y + strokeWidth/2, cellW - strokeWidth, cellH - strokeWidth, Math.max(0,borderRadius-strokeWidth/2));
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = '#ffffff'; ctx.fillRect(x,y,cellW,cellH);
-        ctx.strokeStyle = '#f0f0f0'; ctx.lineWidth = 1; ctx.strokeRect(x+0.5,y+0.5,cellW-1,cellH-1);
+    // prepare list of pages to build:
+    // for "All" we will combine across sizes in ascending order
+    const perGrid = 36;
+    const thumbPixel = 220;
+
+    // build a flat array of {size,code,thumbName}
+    const items = [];
+    for (const sz of sizesToExport) {
+      const sObj = manifest.sizes.find(x => String(x.size) === String(sz));
+      if (!sObj || !Array.isArray(sObj.barcodes)) continue;
+      // iterate barcodes in original order
+      for (const b of sObj.barcodes) {
+        const tn = (Array.isArray(b.images) && b.images.find(n=>/thumb/i.test(n))) || (Array.isArray(b.images) && b.images[0]) || 'thumb.jpeg';
+        items.push({ size: sz, code: String(b.code), thumbName: tn });
       }
     }
-  }
-  return await new Promise((resolve)=> cvs.toBlob(resolve,'image/png', 0.9));
-}
 
-function roundRectPath(ctx, x, y, w, h, r){ ctx.beginPath(); const rr = Math.max(0, Math.min(r, Math.min(w,h)/2)); ctx.moveTo(x+rr, y); ctx.arcTo(x+w, y, x+w, y+h, rr); ctx.arcTo(x+w, y+h, x, y+h, rr); ctx.arcTo(x, y+h, x, y, rr); ctx.arcTo(x, y, x+w, y, rr); ctx.closePath(); }
+    if (items.length === 0) { alert('Không có ảnh để xuất'); return; }
 
-function buildThumbUrlsForSize(size){
-  const s = (manifest && manifest.sizes || []).find(x => String(x.size) === String(size));
-  if(!s) return [];
-  const urls = [];
-  for(const b of (s.barcodes || [])){
-    const thumbName = (Array.isArray(b.images) && b.images.find(n=>/thumb/i.test(n))) || (Array.isArray(b.images) && b.images[0]) || 'thumb.jpeg';
-    const encSize = encodeURIComponent(String(size).trim());
-    const encCode = encodeURIComponent(String(b.code).trim());
-    const url = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
-    urls.push(url);
-  }
-  return urls;
-}
+    // if exporting per-size individually (not combined All), group by size and process per size
+    // but when user selected multiple sizes and allCheckbox is true we already combined above
+    // build pages of urls for processing
+    const allUrls = items.map(it => buildThumbUrl(it.size, it.code, it.thumbName));
+    const pages = chunkArray(allUrls, perGrid);
 
-function extractSizeNumber(s){ if(!s) return NaN; const m = String(s).match(/-?\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : NaN; }
-function compareSizes(a,b){ const na = extractSizeNumber(a); const nb = extractSizeNumber(b); if(!isNaN(na) && !isNaN(nb)) return na - nb; return String(a).localeCompare(String(b)); }
+    // progress UI
+    showProgressPanel();
+    groupsContainer.innerHTML = '';
+    const groupEl = createGroupProgress('export-thumbs', `Xuất thumbnails — Tổng trang: ${pages.length}`);
+    updateOverallProgress(0, pages.length);
 
-// main export
-// selectedSizes: array of size strings (may be empty if exportAll true)
-// exportAll: boolean - if true create mixed grids from all sizes (sorted)
-// This version will include mixed pages (if exportAll) AND per-size pages for selectedSizes (if any).
-async function exportThumbnailsForSizes(selectedSizes, exportAll = false){
-  // if neither exportAll nor selectedSizes provided -> error
-  if(!exportAll && (!Array.isArray(selectedSizes) || selectedSizes.length === 0)) {
-    throw new Error('No sizes selected and exportAll not set');
-  }
+    // if JSZip available we will store in zip and then save, else download each file sequentially
+    const useZip = (typeof JSZip !== 'undefined');
+    const zip = useZip ? new JSZip() : null;
 
-  const zip = new JSZip();
-  const allPromises = [];
-  const perGrid = 36; const concurrencyFetch = 4; const thumbPixel = 220;
-  function buildForSize(sz){ return buildThumbUrlsForSize(sz); }
+    let pageIdx = 0;
+    for (const pageUrls of pages) {
+      pageIdx++;
+      try {
+        // create grid sequentially
+        const blob = await createGridFromUrls(pageUrls, { cols:6, rows:6, thumbSize: thumbPixel, gap:8, bg:'#ffffff' });
+        const fname = (sizesToExport.length === 1)
+                      ? `${sanitizeName(sizesToExport[0])}_P${pageIdx}.png`
+                      : `All_P${pageIdx}.png`;
 
-  // 1) mixed (all) pages
-  if(exportAll){
-    // gather all sizes sorted
-    const sizesSorted = (manifest && manifest.sizes || []).map(s=>String(s.size)).sort(compareSizes);
-    const allUrls = [];
-    for(const sz of sizesSorted){
-      const urls = buildForSize(sz);
-      for(const u of urls) allUrls.push(u);
-    }
-    const groups = chunkArray(allUrls, perGrid);
-    for(let gi=0; gi<groups.length; gi++){
-      const groupUrls = groups[gi];
-      const p = (async ()=>{
-        const bitmaps = await fetchImageBitmaps(groupUrls, concurrencyFetch);
-        while(bitmaps.length < perGrid) bitmaps.push(null);
-        const blob = await createGridImageBitmaps(bitmaps.slice(0,perGrid), { thumbSize: thumbPixel, gap:8, borderRadius:10 });
-        const fname = `All_P${gi+1}.png`;
-        zip.file(fname, blob);
-      })();
-      allPromises.push(p);
-      if(allPromises.length > 2000) await Promise.all(allPromises.splice(0));
-    }
-  }
-
-  // 2) per-size pages for explicitly selected sizes (if any)
-  if(Array.isArray(selectedSizes) && selectedSizes.length > 0){
-    // sort selectedSizes using compareSizes so output is ordered
-    const sizesSorted = selectedSizes.slice().sort(compareSizes);
-    for(const size of sizesSorted){
-      const urls = buildForSize(size);
-      if(!urls || urls.length === 0){
-        // optionally add an empty placeholder image for this size — we skip to reduce zip clutter
-        continue;
-      }
-      const groups = chunkArray(urls, perGrid);
-      for(let gi=0; gi<groups.length; gi++){
-        const groupUrls = groups[gi];
-        const p = (async ()=>{
-          const bitmaps = await fetchImageBitmaps(groupUrls, concurrencyFetch);
-          while(bitmaps.length < perGrid) bitmaps.push(null);
-          const blob = await createGridImageBitmaps(bitmaps.slice(0,perGrid), { thumbSize: thumbPixel, gap:8, borderRadius:10 });
-          const m = String(size).match(/-?\d+(?:\.\d+)?/);
-	const sizeLabel = m ? m[0] : String(size).replace(/\s+/g,'_');
-	const fname = `${sizeLabel}_P${gi+1}.png`;
+        if (useZip) {
           zip.file(fname, blob);
-        })();
-        allPromises.push(p);
-        if(allPromises.length > 2000) await Promise.all(allPromises.splice(0));
+        } else {
+          // download immediately (one by one)
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fname;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          // small yield
+          await sleep(120);
+        }
+
+        markGroupDone(groupEl, true, `Page ${pageIdx}`);
+      } catch (err) {
+        console.error('Export page failed', pageIdx, err);
+        markGroupDone(groupEl, false, `Page ${pageIdx} error`);
+      }
+      updateOverallProgress(pageIdx, pages.length);
+      await sleep(80); // yield between pages
+    }
+
+    // finalize zip if used
+    if (useZip && zip) {
+      try {
+        const content = await zip.generateAsync({ type: 'blob' }, (meta) => {
+          // update progress UI (meta.percent available)
+          const pct = Math.round(meta.percent || 0);
+          overallBar.style.width = pct + '%';
+          overallPercent.textContent = pct + '%';
+        });
+        const u = URL.createObjectURL(content);
+        const a = document.createElement('a'); a.href = u;
+        a.download = `thumbnails_${PREFIX}_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.zip`;
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u);
+      } catch(e){
+        console.error('Zip create failed', e);
+        alert('Tạo file zip thất bại: ' + (e && e.message ? e.message : e));
       }
     }
-  }
 
-  // wait all images processed
-  await Promise.all(allPromises);
-
-  // finalize ZIP and download
-  const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-  const url = URL.createObjectURL(zipBlob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `thumbnails_${PREFIX}_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.zip`;
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    // done
+    markGroupDone(groupEl, true, 'Hoàn tất');
+    updateOverallProgress(pages.length, pages.length);
+    await sleep(300);
+    hideProgressPanel();
+    document.getElementById('modalClose').click();
+  };
 }
-
 
 // initialize after manifest loaded & UI wiring
 (function(){ // call this at end of init or after fetchManifest()
   // show export thumbs button only if logged in
   try{ initExportThumbs(); }catch(e){console.warn('initExportThumbs fail', e);}
 })();
+ // ---------- end Thumbnail export ----------
+
+
 
 </script>
 </body>
