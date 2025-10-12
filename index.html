@@ -142,6 +142,7 @@ img{ max-width:100%; display:block }
 </style>
 <!-- include SheetJS for Excel export -->
 <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 <header id="pageHeader">
@@ -156,6 +157,7 @@ img{ max-width:100%; display:block }
           <button id="refreshBtn" class="btn tab-like">Refresh</button>
           <button id="btn-export-excel" class="btn tab-like">Xuất Excel</button>
           <button id="import-von-btn" class="btn tab-like">Import giá vốn</button>
+	<button id="btn-export-thumbs" class="btn tab-like" style="display:none">Xuất thumbnail</button>
         </div>
       </div>
     </div>
@@ -338,6 +340,11 @@ function updateRoleVisibility(){
   // Import (if exists) visible only for admin
   const importBtn = document.getElementById('import-von-btn');
   if(importBtn) importBtn.style.display = (role === 'admin') ? 'inline-block' : 'none';
+ // Thumbnail export: visible for any logged-in role (limited OR admin)
+  const thumbBtn = document.getElementById('btn-export-thumbs');
+  if(thumbBtn) {
+    thumbBtn.style.display = (role === 'anon') ? 'none' : 'inline-block';
+  }
 }
 
 
@@ -698,7 +705,7 @@ function makeCard(size, bc, withCheckbox=false){
   <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" d="M16 4h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2"/>
   <rect x="8" y="2" width="8" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/>
 </svg>
-    <span style="font-weight:700">${bc.code}</span>
+    <span style="font-weight:700">Lưu / Share</span>
   `;
   shareBtn.onclick = ()=> shareMultipleImages(size, bc);
   row.appendChild(shareBtn);
@@ -1268,8 +1275,8 @@ const sizeVal = sizeSelect ? sizeSelect.value : (newSizeInput ? newSizeInput.val
       if(ri.inputThumb && ri.inputThumb.files && ri.inputThumb.files[0]) thumbFile = ri.inputThumb.files[0];
       else if(ri.tr.__prefilledThumbFile) thumbFile = ri.tr.__prefilledThumbFile;
       else if(detailsFiles.length>0) thumbFile = detailsFiles[0];
-      if(thumbFile){ const processed = await convertImageFileToJpeg(thumbFile); const thumb = new File([await processed.arrayBuffer()], 'thumb.jpeg', { type: 'image/jpeg' }); prepared.push({ file: thumb, remoteName: 'thumb.jpeg' }); }
-      for(const f of detailsFiles){ const p = await convertImageFileToJpeg(f); prepared.push({ file: p, remoteName: p.name }); }
+      if(thumbFile){ const thumb = new File([await thumbFile.arrayBuffer()], 'thumb.jpeg', { type: 'image/jpeg' }); prepared.push({ file: thumb, remoteName: 'thumb.jpeg' }); }
+      for(const f of detailsFiles){ prepared.push({ file: f, remoteName: f.name }); }
       groups.push({ size: effectiveSize, barcode: ri.barcode, prepared, price: ri.priceVal || '' });
     }
 if(groups.length === 0) return alert('Không có hàng để upload sau khi áp dụng skip rules');
@@ -1436,8 +1443,8 @@ try {
 /* render helpers & search */
 function renderAccording(){ updateBodyMultiselectClass(); if(activeTab==='all') renderAll(); else if(activeTab.startsWith('size:')) renderSize(activeTab.split(':')[1]); else if(activeTab==='add') renderAdd(); }
 
-searchInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSearch(); });
-function doSearch(){ const q = (searchInput.value||'').trim().toLowerCase(); if(!q){ alert('Nhập barcode để tìm'); return; } const matches = []; for(const s of manifest.sizes) for(const b of s.barcodes) if(String(b.code).toLowerCase().includes(q)) matches.push({ size: s.size, barcode: b }); if(matches.length===0){ alert('Không tìm thấy'); return; } const first = matches[0]; activeTab = 'size:' + first.size; document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); const tb = Array.from(document.querySelectorAll('.tab')).find(t=>t.textContent.includes(first.size)); if(tb) tb.classList.add('active'); renderAccording(); setTimeout(()=>{ const cards = Array.from(document.querySelectorAll('.card img')); for(const img of cards){ if(img.alt === first.barcode.code){ img.scrollIntoView({behavior:'smooth', block:'center'}); break; } } }, 300); }
+searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const q = searchInput.value || ''; doSearch(q); } });
+function doSearch(query) { const q = String(query || '').trim(); if (!q) { renderAccording(); return; } const qLower = q.toLowerCase(); const results = []; for (const s of (manifest.sizes || [])) { const matched = (s.barcodes || []).filter(b => { const code = String(b.code || '').toLowerCase(); return code.includes(qLower); }); if (matched.length) results.push({ size: s.size, barcodes: matched }); } contentEl.innerHTML = ''; contentEl.appendChild(renderActionsBar()); if (!results.length) { const no = document.createElement('div'); no.className = 'muted'; no.textContent = `Không tìm thấy mã nào chứa "${q}".`; contentEl.appendChild(no); return; } for (const group of results) { const h = document.createElement('div'); h.className = 'section-title'; h.textContent = String(group.size); contentEl.appendChild(h); const grid = document.createElement('div'); grid.className = 'grid'; let barcodes = group.barcodes.slice(); if (priceSortMode) { barcodes.sort((a, b) => { const pa = a && (a.price || a.price === 0) ? Number(String(a.price).replace(/[^\d]/g,'')) : Infinity; const pb = b && (b.price || b.price === 0) ? Number(String(b.price).replace(/[^\d]/g,'')) : Infinity; return (priceSortMode === 'asc') ? (pa - pb) : (pb - pa); }); } for (const bc of barcodes) { grid.appendChild(makeCard(group.size, bc, false)); } contentEl.appendChild(grid); } window.scrollTo({ top: 0, behavior: 'smooth' }); }
 
 /* refresh & clear key */
 refreshBtn.onclick = async ()=> { try{ const key = await promptAndValidateAdminKey(); if(!key) return; const r = await fetch(WORKER_BASE + '/refresh-manifest', { method:'POST', headers:{ 'x-api-key': key }}); if(!r.ok){ const t = await r.text().catch(()=>r.statusText); throw new Error('Refresh failed: ' + t); } await fetchManifest(); alert('Manifest rebuilt'); } catch(err){ console.error(err); alert('Refresh error: ' + err.message); } };
@@ -1592,10 +1599,280 @@ const headerEl = document.getElementById('pageHeader');
 function handleScroll(){ const y = window.scrollY || window.pageYOffset || document.documentElement.scrollTop; if(y === 0) headerEl.classList.remove('header-hidden'); else headerEl.classList.add('header-hidden'); }
 window.addEventListener('scroll', handleScroll, { passive: true });
 /* init */
-async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; handleScroll(); renderAccording();}
+async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; handleScroll(); renderAccording(); initExportThumbs()}
 init();
 updateRoleVisibility();
 document.addEventListener('DOMContentLoaded', ()=>{ updateRoleVisibility(); });
+
+
+// ---------- Thumbnail export: UI + generator ----------
+function initExportThumbs(){
+  const btn = document.getElementById('btn-export-thumbs');
+  if(!btn) return;
+  const role = (typeof getRole === 'function') ? getRole() : 'anon';
+  btn.style.display = (role === 'anon') ? 'none' : 'inline-block';
+  btn.onclick = openExportThumbsUI;
+}
+function updateExportThumbsVisibility(){
+  const btn = document.getElementById('btn-export-thumbs');
+  if(!btn) return;
+  const role = (typeof getRole === 'function') ? getRole() : 'anon';
+  btn.style.display = (role === 'anon') ? 'none' : 'inline-block';
+}
+
+function openExportThumbsUI(){
+  if(typeof getRole === 'function' && getRole() === 'anon'){
+    return alert('Vui lòng đăng nhập để xuất thumbnail.');
+  }
+
+  const container = document.createElement('div');
+  container.style.padding = '12px';
+  container.style.minWidth = '320px';
+  container.style.maxHeight = '60vh';
+  container.style.overflow = 'auto';
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.gap = '8px';
+
+  const title = document.createElement('div');
+  title.style.fontWeight = 700; title.textContent = 'Xuất thumbnail';
+  container.appendChild(title);
+
+  const ctlRow = document.createElement('div'); ctlRow.style.display='flex'; ctlRow.style.gap='8px'; ctlRow.style.alignItems='center';
+  const btnTickAll = document.createElement('button'); btnTickAll.className='btn'; btnTickAll.textContent='Tick all';
+  const btnUntickAll = document.createElement('button'); btnUntickAll.className='btn'; btnUntickAll.textContent='Untick all';
+  ctlRow.appendChild(btnTickAll); ctlRow.appendChild(btnUntickAll);
+  container.appendChild(ctlRow);
+
+  const listWrap = document.createElement('div'); listWrap.style.display='flex'; listWrap.style.flexDirection='column'; listWrap.style.gap='6px';
+  const allRow = document.createElement('label'); allRow.style.display='flex'; allRow.style.alignItems='center'; allRow.style.gap='8px';
+  const allCb = document.createElement('input'); allCb.type='checkbox'; allCb.style.transform='scale(1.1)';
+  const allText = document.createElement('span'); allText.textContent = 'Tất cả';
+  allRow.appendChild(allCb); allRow.appendChild(allText);
+  listWrap.appendChild(allRow);
+
+  const sizeCheckboxes = [];
+  (manifest && Array.isArray(manifest.sizes) ? manifest.sizes : []).forEach(s=>{
+    const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px';
+    const cb = document.createElement('input'); cb.type='checkbox';
+    cb.dataset.size = String(s.size);
+    const txt = document.createElement('span'); txt.textContent = String(s.size);
+    row.appendChild(cb); row.appendChild(txt);
+    listWrap.appendChild(row);
+    sizeCheckboxes.push(cb);
+  });
+  container.appendChild(listWrap);
+
+  const footer = document.createElement('div'); footer.style.display='flex'; footer.style.justifyContent='flex-end'; footer.style.gap='8px';
+  const cancelBtn = document.createElement('button'); cancelBtn.className='btn'; cancelBtn.textContent='Huỷ';
+  const exportBtn = document.createElement('button'); exportBtn.className='btn primary'; exportBtn.textContent = 'Xuất';
+  footer.appendChild(cancelBtn); footer.appendChild(exportBtn);
+  container.appendChild(footer);
+
+  btnTickAll.onclick = ()=> { sizeCheckboxes.forEach(cb=>cb.checked=true); allCb.checked = true; };
+  btnUntickAll.onclick = ()=> { sizeCheckboxes.forEach(cb=>cb.checked=false); allCb.checked = false; };
+
+  // allCb: override flag — do not toggle individual boxes
+  allCb.onchange = ()=> { /* no-op */ };
+  sizeCheckboxes.forEach(cb => { cb.onchange = ()=> { /* no-op */ }; });
+
+  cancelBtn.onclick = ()=> { modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); };
+
+    exportBtn.onclick = async ()=>{
+    const exportAll = allCb.checked === true;
+    // always collect any individually selected sizes
+    const selected = [];
+    sizeCheckboxes.forEach(cb=>{ if(cb.checked) selected.push(cb.dataset.size); });
+    // if nothing selected and not exportAll -> error
+    if (!exportAll && selected.length === 0) { alert('Chọn ít nhất 1 size (hoặc tick "Tất cả").'); return; }
+
+    // sizesToProcess passed to function: we pass selected (may be empty) and exportAll flag
+    const sizesToProcess = selected.slice();
+
+    // close modal
+    modal.classList.remove('open'); modal.setAttribute('aria-hidden','true');
+
+    try {
+      await exportThumbnailsForSizes(sizesToProcess, !!exportAll);
+    } catch(e) {
+      console.error('exportThumbnailsForSizes error', e);
+      alert('Lỗi khi xuất thumbnail: ' + (e && e.message ? e.message : e));
+    }
+  };
+
+
+  showModal('Xuất thumbnail', container);
+}
+
+function chunkArray(arr, size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
+
+async function fetchImageBitmaps(urls, concurrency = 6){
+  const results = new Array(urls.length);
+  let idx = 0;
+  async function worker(){
+    while(true){
+      const i = idx++; if(i >= urls.length) break;
+      const u = urls[i];
+      try{
+        const res = await fetch(u, { mode:'cors', cache:'no-store' });
+        if(!res.ok){ results[i] = null; continue; }
+        const blob = await res.blob();
+        const imgBitmap = await createImageBitmap(blob);
+        results[i] = imgBitmap;
+      }catch(e){ console.warn('fetch image failed', u, e); results[i] = null; }
+    }
+  }
+  await Promise.all(new Array(Math.min(concurrency, urls.length)).fill(0).map(()=>worker()));
+  return results;
+}
+
+async function createGridImageBitmaps(bitmaps, opts = {}){
+  const cols = 6, rows = 6;
+  const thumbSize = opts.thumbSize || 160;
+  const gap = (typeof opts.gap === 'number') ? opts.gap : 8;
+  const borderRadius = (typeof opts.borderRadius === 'number') ? opts.borderRadius : 10;
+  const strokeWidth = 2;
+  const cellW = thumbSize;
+  const cellH = thumbSize;
+  const canvasW = cols * cellW + (cols + 1) * gap;
+  const canvasH = rows * cellH + (rows + 1) * gap;
+  const cvs = document.createElement('canvas');
+  cvs.width = canvasW; cvs.height = canvasH;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvasW,canvasH);
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const idx = r*cols + c;
+      const x = gap + c * (cellW + gap);
+      const y = gap + r * (cellH + gap);
+      if(idx < bitmaps.length && bitmaps[idx]){
+        const bmp = bitmaps[idx];
+        roundRectPath(ctx, x, y, cellW, cellH, borderRadius);
+        ctx.save(); ctx.clip();
+        const sw = bmp.width, sh = bmp.height;
+        const scale = Math.max(cellW / sw, cellH / sh);
+        const dw = sw * scale, dh = sh * scale;
+        const dx = x - (dw - cellW)/2;
+        const dy = y - (dh - cellH)/2;
+        ctx.drawImage(bmp, dx, dy, dw, dh);
+        ctx.restore();
+        ctx.strokeStyle = '#eee'; ctx.lineWidth = strokeWidth;
+        roundRectPath(ctx, x + strokeWidth/2, y + strokeWidth/2, cellW - strokeWidth, cellH - strokeWidth, Math.max(0,borderRadius-strokeWidth/2));
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(x,y,cellW,cellH);
+        ctx.strokeStyle = '#f0f0f0'; ctx.lineWidth = 1; ctx.strokeRect(x+0.5,y+0.5,cellW-1,cellH-1);
+      }
+    }
+  }
+  return await new Promise((resolve)=> cvs.toBlob(resolve,'image/png', 0.9));
+}
+
+function roundRectPath(ctx, x, y, w, h, r){ ctx.beginPath(); const rr = Math.max(0, Math.min(r, Math.min(w,h)/2)); ctx.moveTo(x+rr, y); ctx.arcTo(x+w, y, x+w, y+h, rr); ctx.arcTo(x+w, y+h, x, y+h, rr); ctx.arcTo(x, y+h, x, y, rr); ctx.arcTo(x, y, x+w, y, rr); ctx.closePath(); }
+
+function buildThumbUrlsForSize(size){
+  const s = (manifest && manifest.sizes || []).find(x => String(x.size) === String(size));
+  if(!s) return [];
+  const urls = [];
+  for(const b of (s.barcodes || [])){
+    const thumbName = (Array.isArray(b.images) && b.images.find(n=>/thumb/i.test(n))) || (Array.isArray(b.images) && b.images[0]) || 'thumb.jpeg';
+    const encSize = encodeURIComponent(String(size).trim());
+    const encCode = encodeURIComponent(String(b.code).trim());
+    const url = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
+    urls.push(url);
+  }
+  return urls;
+}
+
+function extractSizeNumber(s){ if(!s) return NaN; const m = String(s).match(/-?\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : NaN; }
+function compareSizes(a,b){ const na = extractSizeNumber(a); const nb = extractSizeNumber(b); if(!isNaN(na) && !isNaN(nb)) return na - nb; return String(a).localeCompare(String(b)); }
+
+// main export
+// selectedSizes: array of size strings (may be empty if exportAll true)
+// exportAll: boolean - if true create mixed grids from all sizes (sorted)
+// This version will include mixed pages (if exportAll) AND per-size pages for selectedSizes (if any).
+async function exportThumbnailsForSizes(selectedSizes, exportAll = false){
+  // if neither exportAll nor selectedSizes provided -> error
+  if(!exportAll && (!Array.isArray(selectedSizes) || selectedSizes.length === 0)) {
+    throw new Error('No sizes selected and exportAll not set');
+  }
+
+  const zip = new JSZip();
+  const allPromises = [];
+  const perGrid = 36; const concurrencyFetch = 4; const thumbPixel = 220;
+  function buildForSize(sz){ return buildThumbUrlsForSize(sz); }
+
+  // 1) mixed (all) pages
+  if(exportAll){
+    // gather all sizes sorted
+    const sizesSorted = (manifest && manifest.sizes || []).map(s=>String(s.size)).sort(compareSizes);
+    const allUrls = [];
+    for(const sz of sizesSorted){
+      const urls = buildForSize(sz);
+      for(const u of urls) allUrls.push(u);
+    }
+    const groups = chunkArray(allUrls, perGrid);
+    for(let gi=0; gi<groups.length; gi++){
+      const groupUrls = groups[gi];
+      const p = (async ()=>{
+        const bitmaps = await fetchImageBitmaps(groupUrls, concurrencyFetch);
+        while(bitmaps.length < perGrid) bitmaps.push(null);
+        const blob = await createGridImageBitmaps(bitmaps.slice(0,perGrid), { thumbSize: thumbPixel, gap:8, borderRadius:10 });
+        const fname = `All_P${gi+1}.png`;
+        zip.file(fname, blob);
+      })();
+      allPromises.push(p);
+      if(allPromises.length > 2000) await Promise.all(allPromises.splice(0));
+    }
+  }
+
+  // 2) per-size pages for explicitly selected sizes (if any)
+  if(Array.isArray(selectedSizes) && selectedSizes.length > 0){
+    // sort selectedSizes using compareSizes so output is ordered
+    const sizesSorted = selectedSizes.slice().sort(compareSizes);
+    for(const size of sizesSorted){
+      const urls = buildForSize(size);
+      if(!urls || urls.length === 0){
+        // optionally add an empty placeholder image for this size — we skip to reduce zip clutter
+        continue;
+      }
+      const groups = chunkArray(urls, perGrid);
+      for(let gi=0; gi<groups.length; gi++){
+        const groupUrls = groups[gi];
+        const p = (async ()=>{
+          const bitmaps = await fetchImageBitmaps(groupUrls, concurrencyFetch);
+          while(bitmaps.length < perGrid) bitmaps.push(null);
+          const blob = await createGridImageBitmaps(bitmaps.slice(0,perGrid), { thumbSize: thumbPixel, gap:8, borderRadius:10 });
+          const m = String(size).match(/-?\d+(?:\.\d+)?/);
+	const sizeLabel = m ? m[0] : String(size).replace(/\s+/g,'_');
+	const fname = `${sizeLabel}_P${gi+1}.png`;
+          zip.file(fname, blob);
+        })();
+        allPromises.push(p);
+        if(allPromises.length > 2000) await Promise.all(allPromises.splice(0));
+      }
+    }
+  }
+
+  // wait all images processed
+  await Promise.all(allPromises);
+
+  // finalize ZIP and download
+  const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `thumbnails_${PREFIX}_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.zip`;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+
+// initialize after manifest loaded & UI wiring
+(function(){ // call this at end of init or after fetchManifest()
+  // show export thumbs button only if logged in
+  try{ initExportThumbs(); }catch(e){console.warn('initExportThumbs fail', e);}
+})();
+
 </script>
 </body>
 </html>
