@@ -67,7 +67,7 @@ body.dark .thumb-wrap{ background:#222528 }
 body.body-multiselect .checkbox-select{ display:block }
 
 /* buttons */
-.btn{ padding:var(--btn-padding); border-radius:8px; border:1px solid rgba(0,0,0,0.06); cursor:pointer; background:transparent; font-size:13px }
+.btn{ padding:var(--btn-padding); border-radius:8px; border:1px solid rgba(0,0,0,0.06); cursor:pointer; background:transparent; font-size:13px; color:var(--tab-text) }
 .btn.primary{ background:var(--accent); color:#fff; border-color:var(--accent) }
 .btn.tab-like{ background:var(--tab-bg); border:1px solid var(--tab-border); color:var(--tab-text) }
 body.dark .btn.tab-like{ background:#14232a; border-color:#1b2b32; color:#9fcffb }
@@ -249,12 +249,28 @@ let GLOBAL_VON_LOADING = null;
 let __currentVonAbortController = null;
 let manifestRaw = null;
 let manifest = null;
+let THUMB_INDEX = [];
 let manifestMap = {};
 let activeTab = 'all';
 let selectedItems = new Set();
 let multiSelectMode = false;
 let priceSortMode = 'asc'; // 'asc' | 'desc' | null
 
+function buildThumbIndex() {
+  THUMB_INDEX = [];
+  if (!manifest || !Array.isArray(manifest.sizes)) return;
+  for (const s of manifest.sizes) {
+    const size = String(s.size || '').trim();
+    for (const b of (s.barcodes || [])) {
+      const code = String(b.code || '').trim();
+      const thumbName = (Array.isArray(b.images) && b.images.find(n => /thumb/i.test(n)))
+                      || (Array.isArray(b.images) && b.images[0])
+                      || 'thumb.jpeg';
+      const thumbUrl = `${WORKER_BASE}/${PREFIX}/${encodeURIComponent(size)}/${encodeURIComponent(code)}/${encodeURIComponent(thumbName)}`;
+      THUMB_INDEX.push({ size, code, thumbName, thumbUrl, price: b.price });
+    }
+  }
+}
 async function loadGlobalVonMap(force = false) {
   if (!force && GLOBAL_VON_MAP) return GLOBAL_VON_MAP;
   if (GLOBAL_VON_LOADING) return GLOBAL_VON_LOADING;
@@ -487,6 +503,7 @@ async function fetchManifest({ forceRefresh=false }={}) {
     }
     manifest = normalizeManifest(manifestRaw || {});
     buildManifestMap();
+	buildThumbIndex();
     logStatus('Manifest loaded');
     buildTabs();
   } catch(err){
@@ -667,7 +684,10 @@ function setActiveButton(){ document.querySelectorAll('.tab').forEach(t=>t.class
 function buildTabs(){
   tabsEl.innerHTML = '';
   tabsEl.appendChild(createTabButton('Tất cả','all'));
-  for(const s of manifest.sizes) tabsEl.appendChild(createTabButton(String(s.size), 'size:'+s.size));
+  for (const s of manifest.sizes) {
+  const cleanLabel = String(s.size).replace(/^Size\s*/i, '').trim(); // bỏ tiền tố "Size "
+  tabsEl.appendChild(createTabButton(cleanLabel, 'size:' + s.size));
+	}
   const spacer = document.createElement('div'); spacer.style.flex='1'; tabsEl.appendChild(spacer);
   tabsEl.appendChild(createTabButton('Thêm','add'));
   setActiveButton();
@@ -1604,7 +1624,6 @@ init();
 updateRoleVisibility();
 document.addEventListener('DOMContentLoaded', ()=>{ updateRoleVisibility(); });
 
-
 // ---------- Thumbnail export: UI + generator ----------
 function initExportThumbs(){
   const btn = document.getElementById('btn-export-thumbs');
@@ -1614,9 +1633,8 @@ function initExportThumbs(){
   btn.onclick = openExportThumbsUI;
 }
 
-/* helpers used by the generator */
+/* small helpers */
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
-
 function loadImageElement(url, timeout = 12000) {
   return new Promise((resolve) => {
     try {
@@ -1629,25 +1647,12 @@ function loadImageElement(url, timeout = 12000) {
         try{ img.src = ''; }catch(e){}
         resolve(null);
       }, timeout);
-      img.onload = () => {
-        if (done) return;
-        done = true;
-        clearTimeout(t);
-        resolve(img);
-      };
-      img.onerror = () => {
-        if (done) return;
-        done = true;
-        clearTimeout(t);
-        resolve(null);
-      };
+      img.onload = () => { if (done) return; done = true; clearTimeout(t); resolve(img); };
+      img.onerror = () => { if (done) return; done = true; clearTimeout(t); resolve(null); };
       img.src = url;
-    } catch(e){
-      resolve(null);
-    }
+    } catch(e){ resolve(null); }
   });
 }
-
 function roundRectPath(ctx, x, y, w, h, r) {
   const radius = Math.min(r, w/2, h/2);
   ctx.beginPath();
@@ -1662,13 +1667,12 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.quadraticCurveTo(x, y, x + radius, y);
   ctx.closePath();
 }
-
 async function createGridFromUrls(urls, opts = {}) {
   const cols = Number(opts.cols || 6);
   const rows = Number(opts.rows || 6);
   const gap = Number(opts.gap || 8);
   const thumbSize = Number(opts.thumbSize || 160);
-  const cornerRadius = Number(opts.cornerRadius || 10);
+  const cornerRadius = Number(opts.cornerRadius || 12);
   const perGrid = cols * rows;
 
   const canvasW = cols * thumbSize + (cols + 1) * gap;
@@ -1678,7 +1682,7 @@ async function createGridFromUrls(urls, opts = {}) {
 
   let canvas, ctx;
   if (typeof OffscreenCanvas !== 'undefined') {
-    canvas = new OffscreenCanvas(canvasW * dpr, canvasH * dpr);
+    canvas = new OffscreenCanvas(Math.round(canvasW * dpr), Math.round(canvasH * dpr));
     ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
   } else {
@@ -1721,7 +1725,7 @@ async function createGridFromUrls(urls, opts = {}) {
       ctx.drawImage(img, dx, dy, dw, dh);
 
       ctx.restore();
-    } catch (e){
+    } catch (e) {
       try { ctx.restore(); } catch(e){}
     } finally {
       try { img.src = ''; } catch(e){}
@@ -1737,14 +1741,16 @@ async function createGridFromUrls(urls, opts = {}) {
   }
 }
 
-/* utility: chunk array */
 function chunkArray(arr, size){
   const out = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
 }
 
-/* build thumb URL - direct original path (no 'thumbnails' folder) */
+function sanitizeName(s){
+  return String(s||'').replace(/^Size\s*/i,'').replace(/\s+/g,'_').replace(/[^\w\-\.]/g,'');
+}
+
 function buildThumbUrl(size, code, thumbName='thumb.jpeg'){
   const encSize = encodeURIComponent(String(size).trim());
   const encCode = encodeURIComponent(String(code).trim());
@@ -1753,6 +1759,25 @@ function buildThumbUrl(size, code, thumbName='thumb.jpeg'){
 
 /* open small UI for choosing which sizes / all then export */
 function openExportThumbsUI(){
+  // hide header Price/Vốn/Thay giá/Close while export UI is open; save previous styles to restore later
+  const modalHeaderLeftEl = document.getElementById('modalHeaderLeft');
+  const modalHeaderRightEl = document.getElementById('modalHeaderRight');
+  const modalCloseBtn = document.getElementById('modalClose');
+  const changePriceBtnEl = document.getElementById('changePriceBtn');
+  const prevHeaderLeftDisplay = modalHeaderLeftEl ? modalHeaderLeftEl.style.display : null;
+  const prevHeaderRightDisplay = modalHeaderRightEl ? modalHeaderRightEl.style.display : null;
+  const prevModalCloseDisplay = modalCloseBtn ? modalCloseBtn.style.display : null;
+  const prevChangePriceDisplay = changePriceBtnEl ? changePriceBtnEl.style.display : null;
+
+  if (modalHeaderLeftEl) modalHeaderLeftEl.style.display = 'none';
+  if (modalHeaderRightEl) {
+    // keep header right but hide the header-level close button specifically
+    if (modalCloseBtn) modalCloseBtn.style.display = 'none';
+    // also hide changePrice button in header area
+    if (changePriceBtnEl) changePriceBtnEl.style.display = 'none';
+  }
+
+  // panel UI
   const panel = document.createElement('div');
   panel.style.minWidth='360px';
   panel.style.maxHeight='70vh';
@@ -1766,11 +1791,13 @@ function openExportThumbsUI(){
   title.style.fontWeight='700'; title.textContent = 'Xuất thumbnails (grid 6×6)';
   panel.appendChild(title);
 
+  // controls row: replace the "All checkbox" with Tick all / Untick all buttons
   const controls = document.createElement('div');
   controls.style.display='flex'; controls.style.gap='8px'; controls.style.alignItems='center';
-  const allCheckbox = document.createElement('input'); allCheckbox.type='checkbox'; allCheckbox.id='export_thumbs_all';
-  const allLabel = document.createElement('label'); allLabel.htmlFor='export_thumbs_all'; allLabel.textContent = 'Tất cả kích cỡ (All)';
-  controls.appendChild(allCheckbox); controls.appendChild(allLabel);
+  const tickAllBtn = document.createElement('button'); tickAllBtn.className='btn'; tickAllBtn.textContent='Tick all';
+  const untickAllBtn = document.createElement('button'); untickAllBtn.className='btn'; untickAllBtn.textContent='Untick all';
+  controls.appendChild(tickAllBtn);
+  controls.appendChild(untickAllBtn);
   panel.appendChild(controls);
 
   const listWrap = document.createElement('div');
@@ -1790,34 +1817,42 @@ function openExportThumbsUI(){
   });
   panel.appendChild(listWrap);
 
+  // action buttons: keep Đóng here (near Xuất) and Xuất
   const actions = document.createElement('div'); actions.style.display='flex'; actions.style.justifyContent='flex-end'; actions.style.gap='8px';
   const btnCancel = document.createElement('button'); btnCancel.className='btn'; btnCancel.textContent='Đóng';
   const btnExport = document.createElement('button'); btnExport.className='btn primary'; btnExport.textContent='Xuất';
   actions.appendChild(btnCancel); actions.appendChild(btnExport);
   panel.appendChild(actions);
 
-  allCheckbox.onchange = ()=> {
-    const v = allCheckbox.checked;
-    listWrap.querySelectorAll('input.export-size-checkbox').forEach(i=>i.checked = v);
+  // wiring tick all / untick all
+  tickAllBtn.onclick = ()=>{ listWrap.querySelectorAll('input.export-size-checkbox').forEach(i=>i.checked=true); };
+  untickAllBtn.onclick = ()=>{ listWrap.querySelectorAll('input.export-size-checkbox').forEach(i=>i.checked=false); };
+
+  // cancel -> close modal and restore header state
+  btnCancel.onclick = ()=> {
+    // restore header visuals
+    try {
+      if (modalHeaderLeftEl) modalHeaderLeftEl.style.display = (prevHeaderLeftDisplay === null ? '' : prevHeaderLeftDisplay);
+      if (modalHeaderRightEl) modalHeaderRightEl.style.display = (prevHeaderRightDisplay === null ? '' : prevHeaderRightDisplay);
+      if (modalCloseBtn) modalCloseBtn.style.display = (prevModalCloseDisplay === null ? '' : prevModalCloseDisplay);
+      if (changePriceBtnEl) changePriceBtnEl.style.display = (prevChangePriceDisplay === null ? '' : prevChangePriceDisplay);
+    } catch(e){ console.warn('restore header failed', e); }
+    document.getElementById('modalClose').click();
   };
 
+  // show modal (title + panel in body)
   showModal('Xuất thumbnails', panel);
-
-  btnCancel.onclick = ()=>{ document.getElementById('modalClose').click(); };
 
   btnExport.onclick = async ()=>{
     const checked = Array.from(listWrap.querySelectorAll('input.export-size-checkbox:checked')).map(i=>String(i.dataset.size));
-    const exportAll = allCheckbox.checked || checked.length === 0;
-    let sizesToExport;
-    if (exportAll) sizesToExport = sizes.slice();
-    else sizesToExport = checked.slice();
+    const exportAll = checked.length === 0; // none checked => treat as All
+    let sizesToExport = exportAll ? sizes.slice() : checked.slice();
 
     if (!sizesToExport || sizesToExport.length === 0) { alert('Không có kích cỡ để xuất'); return; }
 
     const perGrid = 36;
     const thumbPixel = 220;
-
-    const items = [];
+const items = [];
     for (const sz of sizesToExport) {
       const sObj = manifest.sizes.find(x => String(x.size) === String(sz));
       if (!sObj || !Array.isArray(sObj.barcodes)) continue;
@@ -1830,6 +1865,7 @@ function openExportThumbsUI(){
     if (items.length === 0) { alert('Không có ảnh để xuất'); return; }
 
     const allUrls = items.map(it => buildThumbUrl(it.size, it.code, it.thumbName));
+
     const pages = chunkArray(allUrls, perGrid);
 
     showProgressPanel();
@@ -1844,7 +1880,8 @@ function openExportThumbsUI(){
     for (const pageUrls of pages) {
       pageIdx++;
       try {
-        const blob = await createGridFromUrls(pageUrls, { cols:6, rows:6, thumbSize: thumbPixel, gap:4, bg:'#ffffff', cornerRadius:7});
+        // use requested opts: gap:4, cornerRadius:7
+        const blob = await createGridFromUrls(pageUrls, { cols:6, rows:6, thumbSize: thumbPixel, gap:4, bg:'#ffffff', cornerRadius:7 });
         const fname = pages.length === 1 ? `Thumbnail.png` : `Thumbnail_P${pageIdx}.png`;
 
         if (useZip && zip) {
@@ -1891,6 +1928,15 @@ function openExportThumbsUI(){
     updateOverallProgress(pages.length, pages.length);
     await sleep(300);
     hideProgressPanel();
+
+    // restore header visuals after finish
+    try {
+      if (modalHeaderLeftEl) modalHeaderLeftEl.style.display = (prevHeaderLeftDisplay === null ? '' : prevHeaderLeftDisplay);
+      if (modalHeaderRightEl) modalHeaderRightEl.style.display = (prevHeaderRightDisplay === null ? '' : prevHeaderRightDisplay);
+      if (modalCloseBtn) modalCloseBtn.style.display = (prevModalCloseDisplay === null ? '' : prevModalCloseDisplay);
+      if (changePriceBtnEl) changePriceBtnEl.style.display = (prevChangePriceDisplay === null ? '' : prevChangePriceDisplay);
+    } catch(e){ console.warn('restore header failed', e); }
+
     document.getElementById('modalClose').click();
   };
 }
@@ -1901,6 +1947,8 @@ function openExportThumbsUI(){
   try{ initExportThumbs(); }catch(e){console.warn('initExportThumbs fail', e);}
 })();
  // ---------- end Thumbnail export ----------
+
+
 </script>
 </body>
 </html>
