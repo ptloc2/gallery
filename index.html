@@ -36,6 +36,31 @@ header{
 }
 
 header.header-hidden{ transform: translateY(-120%); }
+/* Lock topbar visuals */
+header.topbar-locked {
+  transform: translateY(0) !important;
+  position: sticky !important;
+  top: 0 !important;
+  /* giữ z-index cao để không bị che */
+  z-index: 999;
+}
+
+/* style tick inside the more-panel button */
+#lockTopbarBtn .lock-icon { 
+  margin-left: 8px;
+  opacity: 0;
+  transition: opacity .12s ease;
+  font-weight: 700;
+}
+#lockTopbarBtn.active .lock-icon { opacity: 1; }
+
+/* optional: make the button look toggled when active */
+#lockTopbarBtn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
 body.dark header{ background:#122028 }
 
 .top-row{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
@@ -154,6 +179,9 @@ img{ max-width:100%; display:block }
         <div id="more-panel" aria-hidden="true">
           <button id="authBtn" class="btn tab-like">Đăng nhập</button>
           <button id="themeToggle" class="btn tab-like">Light/Dark</button>
+	<button id="lockTopbarBtn" class="btn tab-like" aria-pressed="false">
+  Lock topbar <span class="lock-icon" aria-hidden="true">✓</span>
+</button>
           <button id="refreshBtn" class="btn tab-like">Refresh</button>
           <button id="btn-export-excel" class="btn tab-like">Xuất Excel</button>
           <button id="import-von-btn" class="btn tab-like">Import giá vốn</button>
@@ -219,6 +247,7 @@ img{ max-width:100%; display:block }
 /* CONFIG */
 const R2_PUBLIC_BASE = "https://pub-9a763a2453ba41939860c4caded896a0.r2.dev";
 const WORKER_BASE = "https://test.lapproak0.workers.dev";
+const WORKER_BASE1= "https://shoes-worker.lapproak0.workers.dev";
 const PREFIX = "Shoes";
 
 /* DOM */
@@ -249,28 +278,12 @@ let GLOBAL_VON_LOADING = null;
 let __currentVonAbortController = null;
 let manifestRaw = null;
 let manifest = null;
-let THUMB_INDEX = [];
 let manifestMap = {};
 let activeTab = 'all';
 let selectedItems = new Set();
 let multiSelectMode = false;
 let priceSortMode = 'asc'; // 'asc' | 'desc' | null
 
-function buildThumbIndex() {
-  THUMB_INDEX = [];
-  if (!manifest || !Array.isArray(manifest.sizes)) return;
-  for (const s of manifest.sizes) {
-    const size = String(s.size || '').trim();
-    for (const b of (s.barcodes || [])) {
-      const code = String(b.code || '').trim();
-      const thumbName = (Array.isArray(b.images) && b.images.find(n => /thumb/i.test(n)))
-                      || (Array.isArray(b.images) && b.images[0])
-                      || 'thumb.jpeg';
-      const thumbUrl = `${WORKER_BASE}/${PREFIX}/${encodeURIComponent(size)}/${encodeURIComponent(code)}/${encodeURIComponent(thumbName)}`;
-      THUMB_INDEX.push({ size, code, thumbName, thumbUrl, price: b.price });
-    }
-  }
-}
 async function loadGlobalVonMap(force = false) {
   if (!force && GLOBAL_VON_MAP) return GLOBAL_VON_MAP;
   if (GLOBAL_VON_LOADING) return GLOBAL_VON_LOADING;
@@ -503,8 +516,7 @@ async function fetchManifest({ forceRefresh=false }={}) {
     }
     manifest = normalizeManifest(manifestRaw || {});
     buildManifestMap();
-	buildThumbIndex();
-    logStatus('Manifest loaded');
+    logStatus('');
     buildTabs();
   } catch(err){
     console.error(err); logStatus('Không load được manifest: ' + err.message); contentEl.innerHTML='';
@@ -708,7 +720,7 @@ function makeCard(size, bc, withCheckbox=false){
   const thumbName = (Array.isArray(bc.images) && bc.images.find(x=>/thumb/i.test(x))) || (Array.isArray(bc.images)? bc.images[0] : null) || 'thumb.jpeg';
   const encSize = encodeURIComponent(String(size).trim());
   const encCode = encodeURIComponent(String(bc.code).trim());
-  const src = `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
+  const src = `${WORKER_BASE1}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
 
   const wrap = document.createElement('div'); wrap.className='thumb-wrap';
   const img = document.createElement('img'); img.src = src; img.alt = bc.code;
@@ -869,7 +881,7 @@ if(vonSpan){
   for(const fn of imgs){
     const imWrap = document.createElement('div');
     const im = document.createElement('img');
-    im.src = `${WORKER_BASE}/${PREFIX}/${encodeURIComponent(String(size).trim())}/${encodeURIComponent(String(bc.code).trim())}/${encodeURIComponent(fn)}`;
+    im.src = `${WORKER_BASE1}/${PREFIX}/${encodeURIComponent(String(size).trim())}/${encodeURIComponent(String(bc.code).trim())}/${encodeURIComponent(fn)}`;
     im.style.width='100%'; im.style.height='100%'; im.style.objectFit='cover';
     imWrap.appendChild(im);
     div.appendChild(imWrap);
@@ -1754,7 +1766,7 @@ function sanitizeName(s){
 function buildThumbUrl(size, code, thumbName='thumb.jpeg'){
   const encSize = encodeURIComponent(String(size).trim());
   const encCode = encodeURIComponent(String(code).trim());
-  return `${WORKER_BASE}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
+  return `${WORKER_BASE1}/${PREFIX}/${encSize}/${encCode}/${encodeURIComponent(thumbName)}`;
 }
 
 /* open small UI for choosing which sizes / all then export */
@@ -1852,7 +1864,8 @@ function openExportThumbsUI(){
 
     const perGrid = 36;
     const thumbPixel = 220;
-const items = [];
+
+    const items = [];
     for (const sz of sizesToExport) {
       const sObj = manifest.sizes.find(x => String(x.size) === String(sz));
       if (!sObj || !Array.isArray(sObj.barcodes)) continue;
@@ -1865,7 +1878,6 @@ const items = [];
     if (items.length === 0) { alert('Không có ảnh để xuất'); return; }
 
     const allUrls = items.map(it => buildThumbUrl(it.size, it.code, it.thumbName));
-
     const pages = chunkArray(allUrls, perGrid);
 
     showProgressPanel();
@@ -1947,6 +1959,69 @@ const items = [];
   try{ initExportThumbs(); }catch(e){console.warn('initExportThumbs fail', e);}
 })();
  // ---------- end Thumbnail export ----------
+// --- Lock topbar feature ---
+(function(){
+  const LOCK_KEY = 'lock_topbar_v1';
+  const lockBtn = document.getElementById('lockTopbarBtn');
+  const headerEl = document.getElementById('pageHeader');
+  if (!lockBtn || !headerEl) return;
+
+  function isLocked() { return localStorage.getItem(LOCK_KEY) === '1'; }
+
+  function applyLock(locked){
+    if(locked){
+      headerEl.classList.add('topbar-locked');
+      // remove any hide class if present
+      headerEl.classList.remove('header-hidden');
+      lockBtn.classList.add('active');
+      lockBtn.setAttribute('aria-pressed', 'true');
+    } else {
+      headerEl.classList.remove('topbar-locked');
+      lockBtn.classList.remove('active');
+      lockBtn.setAttribute('aria-pressed', 'false');
+    }
+  }
+
+  // toggle handler
+  lockBtn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const next = !isLocked();
+    localStorage.setItem(LOCK_KEY, next ? '1' : '0');
+    applyLock(next);
+    // keep more-panel open/close as you want:
+    // document.getElementById('more-control').classList.remove('open'); // optional close
+  });
+
+  // init from localStorage
+  applyLock(isLocked());
+
+  // If some other code adds header-hidden, remove it immediately while locked.
+  if (window.MutationObserver) {
+    const mo = new MutationObserver((mutations)=>{
+      if (!isLocked()) return;
+      for (const m of mutations) {
+        if (m.type === 'attributes' && m.attributeName === 'class') {
+          if (headerEl.classList.contains('header-hidden')) {
+            headerEl.classList.remove('header-hidden');
+          }
+        }
+      }
+    });
+    mo.observe(headerEl, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  // also on scroll: ensure header-hidden won't remain while locked
+  window.addEventListener('scroll', ()=>{
+    if (isLocked()) {
+      headerEl.classList.remove('header-hidden');
+      // ensure transform stays 0
+      headerEl.style.transform = 'translateY(0)';
+    } else {
+      // remove inline transform set above if unlocking
+      headerEl.style.transform = '';
+    }
+  }, { passive: true });
+})();
 
 
 </script>
