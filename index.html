@@ -23,6 +23,7 @@ html,body{height:100%}
 body{font-family:system-ui,Arial;margin:0;background:#f0f6fb;color:#072033; -webkit-font-smoothing:antialiased;}
 body.dark{ background:#111316; color:#d9dee3 }
 
+#refreshBtn {display: none !important;}
 /* header */
 header{
   padding: var(--header-padding) 12px calc(var(--header-padding) + env(safe-area-inset-bottom));
@@ -36,31 +37,6 @@ header{
 }
 
 header.header-hidden{ transform: translateY(-120%); }
-/* Lock topbar visuals */
-header.topbar-locked {
-  transform: translateY(0) !important;
-  position: sticky !important;
-  top: 0 !important;
-  /* giữ z-index cao để không bị che */
-  z-index: 999;
-}
-
-/* style tick inside the more-panel button */
-#lockTopbarBtn .lock-icon { 
-  margin-left: 8px;
-  opacity: 0;
-  transition: opacity .12s ease;
-  font-weight: 700;
-}
-#lockTopbarBtn.active .lock-icon { opacity: 1; }
-
-/* optional: make the button look toggled when active */
-#lockTopbarBtn.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
 body.dark header{ background:#122028 }
 
 .top-row{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
@@ -179,9 +155,6 @@ img{ max-width:100%; display:block }
         <div id="more-panel" aria-hidden="true">
           <button id="authBtn" class="btn tab-like">Đăng nhập</button>
           <button id="themeToggle" class="btn tab-like">Light/Dark</button>
-	<button id="lockTopbarBtn" class="btn tab-like" aria-pressed="false">
-  Lock topbar <span class="lock-icon" aria-hidden="true">✓</span>
-</button>
           <button id="refreshBtn" class="btn tab-like">Refresh</button>
           <button id="btn-export-excel" class="btn tab-like">Xuất Excel</button>
           <button id="import-von-btn" class="btn tab-like">Import giá vốn</button>
@@ -246,7 +219,7 @@ img{ max-width:100%; display:block }
 <script>
 /* CONFIG */
 const R2_PUBLIC_BASE = "https://pub-9a763a2453ba41939860c4caded896a0.r2.dev";
-const WORKER_BASE = "https://test.lapproak0.workers.dev";
+const WORKER_BASE = "https://test1.lapproak0.workers.dev";
 const WORKER_BASE1= "https://shoes-worker.lapproak0.workers.dev";
 const PREFIX = "Shoes";
 
@@ -1627,11 +1600,11 @@ importVonInput.addEventListener('change', async (e) => {
 });
 
 /* header hide/show: header shown only when at very top */
-const headerEl = document.getElementById('pageHeader');
-function handleScroll(){ const y = window.scrollY || window.pageYOffset || document.documentElement.scrollTop; if(y === 0) headerEl.classList.remove('header-hidden'); else headerEl.classList.add('header-hidden'); }
-window.addEventListener('scroll', handleScroll, { passive: true });
+//const headerEl = document.getElementById('pageHeader');
+//function handleScroll(){ const y = window.scrollY || window.pageYOffset || document.documentElement.scrollTop; if(y === 0) headerEl.classList.remove('header-hidden'); else //headerEl.classList.add('header-hidden'); }
+//window.addEventListener('scroll', handleScroll, { passive: true });
 /* init */
-async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; handleScroll(); renderAccording(); initExportThumbs()}
+async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; renderAccording(); initExportThumbs()}
 init();
 updateRoleVisibility();
 document.addEventListener('DOMContentLoaded', ()=>{ updateRoleVisibility(); });
@@ -1959,69 +1932,6 @@ function openExportThumbsUI(){
   try{ initExportThumbs(); }catch(e){console.warn('initExportThumbs fail', e);}
 })();
  // ---------- end Thumbnail export ----------
-// --- Lock topbar feature ---
-(function(){
-  const LOCK_KEY = 'lock_topbar_v1';
-  const lockBtn = document.getElementById('lockTopbarBtn');
-  const headerEl = document.getElementById('pageHeader');
-  if (!lockBtn || !headerEl) return;
-
-  function isLocked() { return localStorage.getItem(LOCK_KEY) === '1'; }
-
-  function applyLock(locked){
-    if(locked){
-      headerEl.classList.add('topbar-locked');
-      // remove any hide class if present
-      headerEl.classList.remove('header-hidden');
-      lockBtn.classList.add('active');
-      lockBtn.setAttribute('aria-pressed', 'true');
-    } else {
-      headerEl.classList.remove('topbar-locked');
-      lockBtn.classList.remove('active');
-      lockBtn.setAttribute('aria-pressed', 'false');
-    }
-  }
-
-  // toggle handler
-  lockBtn.addEventListener('click', (e)=>{
-    e.stopPropagation();
-    const next = !isLocked();
-    localStorage.setItem(LOCK_KEY, next ? '1' : '0');
-    applyLock(next);
-    // keep more-panel open/close as you want:
-    // document.getElementById('more-control').classList.remove('open'); // optional close
-  });
-
-  // init from localStorage
-  applyLock(isLocked());
-
-  // If some other code adds header-hidden, remove it immediately while locked.
-  if (window.MutationObserver) {
-    const mo = new MutationObserver((mutations)=>{
-      if (!isLocked()) return;
-      for (const m of mutations) {
-        if (m.type === 'attributes' && m.attributeName === 'class') {
-          if (headerEl.classList.contains('header-hidden')) {
-            headerEl.classList.remove('header-hidden');
-          }
-        }
-      }
-    });
-    mo.observe(headerEl, { attributes: true, attributeFilter: ['class'] });
-  }
-
-  // also on scroll: ensure header-hidden won't remain while locked
-  window.addEventListener('scroll', ()=>{
-    if (isLocked()) {
-      headerEl.classList.remove('header-hidden');
-      // ensure transform stays 0
-      headerEl.style.transform = 'translateY(0)';
-    } else {
-      // remove inline transform set above if unlocking
-      headerEl.style.transform = '';
-    }
-  }, { passive: true });
-})();
 
 
 </script>
