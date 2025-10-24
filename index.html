@@ -36,7 +36,6 @@ header{
   transform: translateY(0);
 }
 
-header.header-hidden{ transform: translateY(-120%); }
 body.dark header{ background:#122028 }
 
 .top-row{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
@@ -139,6 +138,28 @@ img{ max-width:100%; display:block }
 #more-panel button { width:100%; padding:8px 10px; text-align:left; border-radius:6px; border:none; background:#f6f6f6; cursor:pointer; }
 #more-panel button:hover{ background:#eee; }
 #more-control.open #more-panel { display:flex; }
+/* đảm bảo header nổi và không bị ẩn, và nội dung không bị che */
+#pageHeader {
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+}
+
+/* loại margin trên heading đầu để tránh khoảng thừa */
+main h1:first-child,
+main h2:first-child,
+.content h1:first-child,
+.content h2:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* thêm khoảng cho nội dung tương ứng với chiều cao header (sửa giá trị nếu header cao hơn) */
+body, main {
+  padding-top: 64px; /* thay 64px bằng chiều cao header thực tế */
+}
 
 </style>
 <!-- include SheetJS for Excel export -->
@@ -219,7 +240,7 @@ img{ max-width:100%; display:block }
 <script>
 /* CONFIG */
 const R2_PUBLIC_BASE = "https://pub-9a763a2453ba41939860c4caded896a0.r2.dev";
-const WORKER_BASE = "https://test1.lapproak0.workers.dev";
+const WORKER_BASE = "https://test.lapproak0.workers.dev";
 const WORKER_BASE1= "https://shoes-worker.lapproak0.workers.dev";
 const PREFIX = "Shoes";
 
@@ -661,7 +682,6 @@ function createTabButton(text, key){
     btn.classList.add('active');
     setActiveButton();
     renderAccording();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
   return btn;
 }
@@ -1599,12 +1619,8 @@ importVonInput.addEventListener('change', async (e) => {
   }
 });
 
-/* header hide/show: header shown only when at very top */
-//const headerEl = document.getElementById('pageHeader');
-//function handleScroll(){ const y = window.scrollY || window.pageYOffset || document.documentElement.scrollTop; if(y === 0) headerEl.classList.remove('header-hidden'); else //headerEl.classList.add('header-hidden'); }
-//window.addEventListener('scroll', handleScroll, { passive: true });
 /* init */
-async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; renderAccording(); initExportThumbs()}
+async function init(){ priceSortMode = 'asc'; await fetchManifest(); updateBodyMultiselectClass(); floatDelete.style.display = 'none'; handleScroll(); renderAccording(); initExportThumbs()}
 init();
 updateRoleVisibility();
 document.addEventListener('DOMContentLoaded', ()=>{ updateRoleVisibility(); });
