@@ -17,7 +17,23 @@
   --progress-max-height:260px;
   --card-min:120px;
   --header-padding:10px;
+  --header-height: 0px; 
 }
+/* optional: use CSS var for fixed header layout or other rules */
+
+/* nếu header fixed, đảm bảo background + z-index */
+#pageHeader {
+  position: fixed; /* hoặc sticky tùy bạn */
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  /* background cần để nội dung cuộn không thấy phía sau */
+  background: var(--bg, white);
+}
+
+/* tránh margin-top thừa trong các heading đầu */
+main h1:first-child, main h2:first-child { margin-top: 0 !important; }
 *{box-sizing:border-box}
 html,body{height:100%}
 body{font-family:system-ui,Arial;margin:0;background:#f0f6fb;color:#072033; -webkit-font-smoothing:antialiased;}
@@ -1950,6 +1966,79 @@ function openExportThumbsUI(){
  // ---------- end Thumbnail export ----------
 
 
+</script><script>
+/* --- Auto-sync header spacing (handles Safari URL bar shrinking/expanding) --- */
+(function(){
+  const header = document.getElementById('pageHeader') || document.querySelector('header');
+  // select the main content container you want to push down
+  const main = document.querySelector('main') || document.querySelector('#content') || document.body;
+  if (!header || !main) return;
+
+  // helper debounce
+  function debounce(fn, wait = 50) {
+    let t = null;
+    return (...args) => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => { fn(...args); t = null; }, wait);
+    };
+  }
+
+  // apply padding (uses CSS var + safe-area)
+  function applySpacing(h) {
+    // set CSS variable so you can also use it in CSS if needed
+    document.documentElement.style.setProperty('--header-height', `${h}px`);
+    // include safe-area-inset-top for iOS notch
+    main.style.paddingTop = `calc(${h}px + env(safe-area-inset-top))`;
+  }
+
+  // compute header height robustly (includes layout, transforms applied)
+  function measureAndApply() {
+    // If header uses transform to translateY for show/hide, getBoundingClientRect gives visual size.
+    const rect = header.getBoundingClientRect();
+    // use offsetHeight as fallback (better for layout size)
+    const h = Math.max(Math.round(rect.height || header.offsetHeight || 0), 0);
+    applySpacing(h);
+  }
+
+  const debouncedMeasure = debounce(measureAndApply, 40);
+
+  // Run once initially
+  measureAndApply();
+
+  // 1) Watch header resize (ResizeObserver is best)
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(debouncedMeasure);
+    ro.observe(header);
+  } else {
+    // fallback: measure on load/resize
+    window.addEventListener('resize', debouncedMeasure, { passive: true });
+  }
+
+  // 2) Watch DOM changes that may affect header (styles/classes)
+  if (window.MutationObserver) {
+    const mo = new MutationObserver(debouncedMeasure);
+    mo.observe(header, { attributes: true, attributeFilter: ['class','style'], childList: true, subtree: false });
+  }
+
+  // 3) On mobile Safari the visual viewport changes when the URL bar hides/shows.
+  //    Use visualViewport if available.
+  if (window.visualViewport) {
+    // visualViewport resize or scroll can change layout
+    window.visualViewport.addEventListener('resize', debouncedMeasure);
+    window.visualViewport.addEventListener('scroll', debouncedMeasure);
+  } else {
+    // fallback for other browsers
+    window.addEventListener('resize', debouncedMeasure, { passive: true });
+    window.addEventListener('scroll', debouncedMeasure, { passive: true });
+  }
+
+  // 4) Also measure on orientation change and load
+  window.addEventListener('orientationchange', debouncedMeasure);
+  window.addEventListener('load', debouncedMeasure);
+
+  // Optional: expose a method for debugging/forcing recalculation:
+  window.__forceSyncHeaderSpacing = measureAndApply;
+})();
 </script>
 </body>
 </html>
