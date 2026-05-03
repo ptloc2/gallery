@@ -539,17 +539,11 @@ async function exportExcelFromModel() {
           (Array.isArray(b.images) && b.images[0]) ||
           'thumb.jpeg';
 
-        const thumbUrl = `${R2_PUBLIC_BASE}/${PREFIX}/${encodeURIComponent(size)}/${encodeURIComponent(code)}/${encodeURIComponent(thumbName)}`;
+        const thumbUrl = `${R2_PUBLIC_BASE}/${PREFIX}/${encodeURIComponent(
+          size
+        )}/${encodeURIComponent(code)}/${encodeURIComponent(thumbName)}`;
 
-        // lấy ngày tải lên từ manifest (worker sẽ thêm field uploadedAt)
-        const uploadedAt = b.uploadedAt || '';
-        const uploadDateVn = uploadedAt
-          ? new Date(uploadedAt).toLocaleString('vi-VN', {
-              timeZone: 'Asia/Ho_Chi_Minh',
-            })
-          : '';
-
-        rows.push({ code, price, size, thumbName, thumbUrl, uploadDateVn });
+        rows.push({ code, price, size, thumbName, thumbUrl });
       }
     }
 
@@ -573,13 +567,26 @@ async function exportExcelFromModel() {
       : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
     const startRowZero = range.e.r + 1;
 
-    // tiêu đề cột
+    let upTimeMap = {};
+    try {
+      const tres = await fetch(`${WORKER_BASE}/updatetime.json`, {
+        cache: 'no-store',
+      });
+      if (tres.ok) {
+        const j = await tres.json().catch(() => null);
+        if (j && typeof j === 'object') upTimeMap = j;
+      }
+    } catch (e) {
+      console.warn('fetch updatetime.json failed', e);
+    }
+
     ws['Q1'] = { t: 's', v: 'Size' };
     ws['Y1'] = { t: 's', v: 'Ngày tải lên' };
 
     for (let i = 0; i < rows.length; i++) {
       const r = startRowZero + i;
       const code = rows[i].code || '';
+      const size = rows[i].size || '';
       const priceRaw = rows[i].price || '';
       const priceNum = parseInt(String(priceRaw).replace(/[^\d]/g, '')) || 0;
       const priceToWrite = priceNum * 1000;
@@ -588,19 +595,33 @@ async function exportExcelFromModel() {
       try {
         const maybe =
           vonMap && (vonMap.hasOwnProperty(code) ? vonMap[code] : undefined);
-        if (maybe !== undefined && maybe !== null && String(maybe).trim() !== '') {
+        if (
+          maybe !== undefined &&
+          maybe !== null &&
+          String(maybe).trim() !== ''
+        ) {
           const iv = parseInt(String(maybe).replace(/[^\d]/g, ''), 10);
           if (!Number.isNaN(iv)) vonVal = iv;
         }
-      } catch (e) {
+      } catch {
         vonVal = '';
       }
+
+      const uploadedAt = upTimeMap?.[size]?.[code] || '';
+      const uploadDateVn = uploadedAt
+        ? new Date(uploadedAt).toLocaleString('vi-VN', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+          })
+        : '';
 
       ws[XLSX.utils.encode_cell({ c: 0, r })] = { t: 's', v: 'Hàng hoá' };
       ws[XLSX.utils.encode_cell({ c: 1, r })] = { t: 's', v: 'Giày Bóng Rổ' };
       ws[XLSX.utils.encode_cell({ c: 2, r })] = { t: 's', v: code };
       ws[XLSX.utils.encode_cell({ c: 3, r })] = { t: 's', v: code };
-      ws[XLSX.utils.encode_cell({ c: 4, r })] = { t: 's', v: 'Giày Bóng Rổ - ' + code };
+      ws[XLSX.utils.encode_cell({ c: 4, r })] = {
+        t: 's',
+        v: 'Giày Bóng Rổ - ' + code,
+      };
       ws[XLSX.utils.encode_cell({ c: 6, r })] = { t: 'n', v: priceToWrite };
       ws[XLSX.utils.encode_cell({ c: 7, r })] = { t: 'n', v: Number(vonVal) };
 
@@ -609,30 +630,36 @@ async function exportExcelFromModel() {
       ws[XLSX.utils.encode_cell({ c: 10, r })] = { t: 's', v: 1 };
       ws[XLSX.utils.encode_cell({ c: 11, r })] = { t: 's', v: 1 };
 
-      // Q = Size
+      ws[XLSX.utils.encode_cell({ c: 16, r })] = { t: 's', v: size };
+      ws[XLSX.utils.encode_cell({ c: 24, r })] = {
+        t: 's',
+        v: uploadDateVn || '',
+      };
+      ws[XLSX.utils.encode_cell({ c: 25, r })] = {
+        t: 's',
+        v: rows[i].thumbUrl || '',
+      };
 
-      // Y = Ngày tải lên
-      ws[XLSX.utils.encode_cell({ c: 24, r })] = { t: 's', v: rows[i].uploadDateVn || '' };
-
-      // nếu bạn vẫn muốn giữ thumbUrl thì chuyển sang cột Z
-      ws[XLSX.utils.encode_cell({ c: 16, r })] = { t: 's', v: rows[i].thumbUrl || '' };
-
-      ws[XLSX.utils.encode_cell({ c: 20, r })] = { t: 's', v: rows[i].size || '' };
+      ws[XLSX.utils.encode_cell({ c: 20, r })] = { t: 's', v: 1 };
     }
 
     const newER = startRowZero + rows.length - 1;
     const newEC = Math.max(range.e.c || 25, 25);
-    ws['!ref'] = XLSX.utils.encode_range({
+    const newRange = {
       s: { r: Math.min(range.s.r, 0), c: 0 },
       e: { r: Math.max(range.e.r, newER), c: newEC },
-    });
+    };
+    ws['!ref'] = XLSX.utils.encode_range(newRange);
 
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([wbout], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `export_${PREFIX}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.xlsx`;
+    a.download = `export_${PREFIX}_${new Date()
+      .toISOString()
+      .slice(0, 19)
+      .replace(/[:T]/g, '-')}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -641,7 +668,10 @@ async function exportExcelFromModel() {
     document.getElementById('more-control').classList.remove('open');
   } catch (err) {
     console.error('exportExcel error', err);
-    alert('Xuất Excel lỗi: ' + (err && err.message ? err.message : String(err)));
+    alert(
+      'Xuất Excel lỗi: ' +
+        (err && err.message ? err.message : String(err))
+    );
   }
 }
 
